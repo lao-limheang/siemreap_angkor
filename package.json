@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "allowScripts": {
+    "sqlite3@6.0.1": true
+  },
   "scripts": {
     "dev": "concurrently \"vite\" \"npm run server\"",
     "server": "node server/server.js",
