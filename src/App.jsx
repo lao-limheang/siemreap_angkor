@@ -136,8 +136,10 @@ function App() {
 
   useEffect(() => {
     fetchPublicSettings();
-    const socketUrl = window.location.hostname === 'localhost' ? 'http://localhost:3000' : '/';
-    const socket = io(socketUrl);
+    // Vercel serves the API as short-lived functions and does not support the
+    // persistent Socket.IO connection used by the local Express server.
+    if (window.location.hostname !== 'localhost') return undefined;
+    const socket = io('http://localhost:3000');
     socket.on('settings_updated', fetchPublicSettings);
     return () => socket.disconnect();
   }, [fetchPublicSettings]);

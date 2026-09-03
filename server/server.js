@@ -7,11 +7,21 @@ import jwt from 'jsonwebtoken';
 import sqlite3 from 'sqlite3';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { copyFileSync, existsSync } from 'fs';
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const databasePath = process.env.VERCEL
+  ? join('/tmp', 'app.db')
+  : join(__dirname, 'app.db');
+
+// Vercel's deployed filesystem is read-only, so each function instance gets
+// a writable temporary copy of the seed database.
+if (process.env.VERCEL && !existsSync(databasePath)) {
+  copyFileSync(join(__dirname, 'app.db'), databasePath);
+}
 
 const app = express();
 const httpServer = createServer(app);
@@ -29,7 +39,7 @@ app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 // ===================== DATABASE =====================
-const db = new sqlite3.Database(join(__dirname, 'app.db'), (err) => {
+const db = new sqlite3.Database(databasePath, (err) => {
   if (err) { console.error("Error opening database", err.message); return; }
   
   db.serialize(() => {
@@ -1207,4 +1217,8 @@ app.post('/api/settings/test', authenticateToken, async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-httpServer.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+if (!process.env.VERCEL) {
+  httpServer.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+}
+
+export default app;
