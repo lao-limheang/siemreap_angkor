@@ -32,7 +32,8 @@ import RoomHistoryTab from './admin/RoomHistoryTab';
 import RoomIncomeTab from './admin/RoomIncomeTab';
 import CustomerDocsTab from './admin/CustomerDocsTab';
 import BookingStockTab from './admin/BookingStockTab';
-import { normalizeRental, normalizeBooking, normalizeRoom, normalizeMoto } from '../utils/dataNormalizer';
+import { normalizeRental, normalizeBooking, normalizeRoom, normalizeMoto, asArray, toDateStr } from '../utils/dataNormalizer';
+import { fileToBase64 } from '../utils/imageUtils';
 import PaginationControls from './common/PaginationControls';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -144,6 +145,9 @@ export default function Admin() {
   const authPost = (body) => ({ method:'POST', headers: authHeaders(), body: JSON.stringify(body) });
   const authPatch = (body) => ({ method:'PATCH', headers: authHeaders(), body: JSON.stringify(body) });
   const authDelete = () => ({ method:'DELETE', headers: authHeaders() });
+  const mapSafe = (arr, fn) => (Array.isArray(arr) ? arr.map(item => {
+    try { return fn(item); } catch (err) { console.error(err); return item; }
+  }) : []);
 
   // ── fetch helpers ────────────────────────────────────────────────────────────
   const fetchAll = useCallback(async () => {
@@ -166,10 +170,10 @@ export default function Admin() {
       ]);
       const safeGuests = Array.isArray(g) ? g : [];
       const safeModels = Array.isArray(mdls) ? mdls : [];
-      const safeBikes = Array.isArray(b) ? b.map(x => normalizeMoto(x, safeModels)) : [];
-      const safeRooms = Array.isArray(r) ? r.map(normalizeRoom) : [];
-      const safeRentals = Array.isArray(rn) ? rn.map(x => normalizeRental(x, safeGuests, safeBikes, safeModels)) : [];
-      const safeBookings = Array.isArray(bk) ? bk.map(x => normalizeBooking(x, safeGuests, safeBikes, safeModels)) : [];
+      const safeBikes = mapSafe(b, x => normalizeMoto(x, safeModels));
+      const safeRooms = mapSafe(r, normalizeRoom);
+      const safeRentals = mapSafe(rn, x => normalizeRental(x, safeGuests, safeBikes, safeModels));
+      const safeBookings = mapSafe(bk, x => normalizeBooking(x, safeGuests, safeBikes, safeModels));
 
       setGuests(safeGuests);
       setModels(safeModels);
@@ -224,6 +228,16 @@ export default function Admin() {
               }
             }
           });
+          if ('hero_images' in parsed) parsed.hero_images = asArray(parsed.hero_images);
+          if ('testimonials' in parsed) parsed.testimonials = asArray(parsed.testimonials);
+          if ('services_bar' in parsed) parsed.services_bar = asArray(parsed.services_bar);
+          if (parsed.why_us && typeof parsed.why_us === 'object') {
+            parsed.why_us = {
+              ...parsed.why_us,
+              stats: asArray(parsed.why_us.stats),
+              features: asArray(parsed.why_us.features),
+            };
+          }
           setSettings(prev => ({ ...prev, ...data, ...parsed }));
         }
       })
@@ -243,7 +257,7 @@ export default function Admin() {
 
     const unsubBikes = MotoService.subscribe((firestoreMotos) => {
       if (firestoreMotos && firestoreMotos.length > 0) {
-        setBikes(firestoreMotos.map(x => normalizeMoto(x, models)));
+        setBikes(mapSafe(firestoreMotos, x => normalizeMoto(x, models)));
       }
     });
     const unsubModels = BikeModelService.subscribe((firestoreModels) => {
@@ -253,12 +267,12 @@ export default function Admin() {
     });
     const unsubRentals = RentalService.subscribe((firestoreRentals) => {
       if (firestoreRentals && firestoreRentals.length > 0) {
-        setRentals(firestoreRentals.map(x => normalizeRental(x, guests, bikes, models)));
+        setRentals(mapSafe(firestoreRentals, x => normalizeRental(x, guests, bikes, models)));
       }
     });
     const unsubBookings = BookingService.subscribe((firestoreBookings) => {
       if (firestoreBookings && firestoreBookings.length > 0) {
-        setBookings(firestoreBookings.map(x => normalizeBooking(x, guests, bikes, models)));
+        setBookings(mapSafe(firestoreBookings, x => normalizeBooking(x, guests, bikes, models)));
       }
     });
     const unsubCustomers = CustomerService.subscribe((firestoreCustomers) => {
@@ -268,7 +282,7 @@ export default function Admin() {
     });
     const unsubRooms = RoomService.subscribe((firestoreRooms) => {
       if (firestoreRooms && firestoreRooms.length > 0) {
-        setRooms(firestoreRooms.map(normalizeRoom));
+        setRooms(mapSafe(firestoreRooms, normalizeRoom));
       }
     });
     const unsubMaintenance = MaintenanceService.subscribe((firestoreMaint) => {
@@ -707,12 +721,11 @@ export default function Admin() {
                         <input
                           type="file"
                           accept="image/*"
-                          onChange={e => {
+                          onChange={async e => {
                             const f = e.target.files[0];
                             if (f) {
-                              const r = new FileReader();
-                              r.onloadend = () => setSettings({ ...settings, about_us: { ...settings.about_us, image1: r.result } });
-                              r.readAsDataURL(f);
+                              const dataUrl = await fileToBase64(f, 1400, 1400, 0.8);
+                              setSettings({ ...settings, about_us: { ...settings.about_us, image1: dataUrl } });
                             }
                           }}
                           className="w-full text-xs text-stone-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-white file:text-stone-700 file:border file:border-stone-200 cursor-pointer"
@@ -746,12 +759,11 @@ export default function Admin() {
                         <input
                           type="file"
                           accept="image/*"
-                          onChange={e => {
+                          onChange={async e => {
                             const f = e.target.files[0];
                             if (f) {
-                              const r = new FileReader();
-                              r.onloadend = () => setSettings({ ...settings, about_us: { ...settings.about_us, image2: r.result } });
-                              r.readAsDataURL(f);
+                              const dataUrl = await fileToBase64(f, 1400, 1400, 0.8);
+                              setSettings({ ...settings, about_us: { ...settings.about_us, image2: dataUrl } });
                             }
                           }}
                           className="w-full text-xs text-stone-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-white file:text-stone-700 file:border file:border-stone-200 cursor-pointer"
@@ -781,7 +793,7 @@ export default function Admin() {
               <div className={`${cardCls} p-6`}>
                 <h3 className="font-bold text-stone-900 mb-5"><i className="fa-solid fa-star mr-2 text-amber-500"></i>Customer Reviews</h3>
                 <div className="space-y-4">
-                  {(settings.testimonials||[]).map((t,i)=>(
+                  {(asArray(settings.testimonials)).map((t,i)=>(
                     <div key={i} className="p-4 border border-stone-200 rounded-xl bg-stone-50 flex gap-4">
                       <div className="flex-1 space-y-3">
                         <div className="grid grid-cols-3 gap-3">
@@ -833,7 +845,7 @@ export default function Admin() {
                   
                   {/* Stats */}
                   <label className={labelCls}>Statistics (e.g. 500+ Happy Guests)</label>
-                  {(settings.why_us?.stats||[]).map((s,i)=>(
+                  {(asArray(settings.why_us?.stats)).map((s,i)=>(
                     <div key={i} className="flex gap-3">
                       <input type="text" value={s.num} placeholder="Number (e.g. 500+)" onChange={e=>{const a=[...settings.why_us.stats];a[i]={...a[i],num:e.target.value};setSettings({...settings,why_us:{...settings.why_us,stats:a}})}} className={inputCls} />
                       <input type="text" value={s.label} placeholder="Label" onChange={e=>{const a=[...settings.why_us.stats];a[i]={...a[i],label:e.target.value};setSettings({...settings,why_us:{...settings.why_us,stats:a}})}} className={inputCls} />
@@ -844,7 +856,7 @@ export default function Admin() {
 
                   {/* Features */}
                   <label className={labelCls}>Features (Grid)</label>
-                  {(settings.why_us?.features||[]).map((f,i)=>(
+                  {(asArray(settings.why_us?.features)).map((f,i)=>(
                     <div key={i} className="p-3 border border-stone-200 rounded-lg space-y-2 bg-stone-50 relative">
                       <div className="grid grid-cols-2 gap-3">
                         <input type="text" value={f.title} placeholder="Title" onChange={e=>{const a=[...settings.why_us.features];a[i]={...a[i],title:e.target.value};setSettings({...settings,why_us:{...settings.why_us,features:a}})}} className={inputCls} />
@@ -865,7 +877,7 @@ export default function Admin() {
               <div className={`${cardCls} p-6`}>
                 <h3 className="font-bold text-stone-900 mb-5"><i className="fa-solid fa-icons mr-2 text-purple-500"></i>Services Bar (4 Buttons)</h3>
                 <div className="space-y-4">
-                  {(settings.services_bar||[]).map((s,i)=>(
+                  {(asArray(settings.services_bar)).map((s,i)=>(
                     <div key={i} className="flex gap-3">
                       <input type="text" value={s.icon} placeholder="Icon (e.g. fa-car)" onChange={e=>{const a=[...settings.services_bar];a[i]={...a[i],icon:e.target.value};setSettings({...settings,services_bar:a})}} className={inputCls} />
                       <input type="text" value={s.label} placeholder="Label" onChange={e=>{const a=[...settings.services_bar];a[i]={...a[i],label:e.target.value};setSettings({...settings,services_bar:a})}} className={inputCls} />
@@ -881,13 +893,13 @@ export default function Admin() {
               {/* Hero Slideshow */}
               <div className={`${cardCls} p-6`}>
                 <h3 className="font-bold text-stone-900 mb-5"><i className="fa-regular fa-images mr-2 text-sky-500"></i>Hero Slideshow</h3>
-                <input type="file" accept="image/*" onChange={e=>{const f=e.target.files[0];if(f){const r=new FileReader();r.onloadend=()=>setSettings({...settings,hero_images:[...(settings.hero_images||[]),r.result]});r.readAsDataURL(f);}}} className="w-full text-sm text-stone-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-brand-50 file:text-brand-600 hover:file:bg-brand-100 cursor-pointer mb-4" />
+                <input type="file" accept="image/*" onChange={async e=>{const f=e.target.files[0];if(f){const dataUrl=await fileToBase64(f,1920,1080,0.75);setSettings({...settings,hero_images:[...asArray(settings.hero_images),dataUrl]});}}} className="w-full text-sm text-stone-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-brand-50 file:text-brand-600 hover:file:bg-brand-100 cursor-pointer mb-4" />
                 <div className="flex flex-wrap gap-3 mb-4">
-                  {(settings.hero_images||[]).map((img,i)=>(
+                  {asArray(settings.hero_images).map((img,i)=>(
                     <div key={i} className="relative group w-24 h-24 rounded-xl overflow-hidden border border-stone-200">
                       <img src={img} className="w-full h-full object-cover" />
                       <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center">
-                        <button onClick={()=>{const a=[...settings.hero_images];a.splice(i,1);setSettings({...settings,hero_images:a});}} className="w-8 h-8 bg-red-500 rounded-full text-white flex items-center justify-center"><i className="fa-solid fa-trash text-xs"></i></button>
+                        <button onClick={()=>{const a=[...asArray(settings.hero_images)];a.splice(i,1);setSettings({...settings,hero_images:a});}} className="w-8 h-8 bg-red-500 rounded-full text-white flex items-center justify-center"><i className="fa-solid fa-trash text-xs"></i></button>
                       </div>
                     </div>
                   ))}
@@ -1163,18 +1175,15 @@ function RoomsTab({ rooms, occupancy, auth, fetchAll, fetchDash, inputCls, label
   };
 
   // Room Catalog Handlers
-  const handleRoomImageUpload = (e) => {
+  const handleRoomImageUpload = async (e) => {
     const file = e.target.files[0];
     if (file) {
-      const r = new FileReader();
-      r.onloadend = () => {
-        if (editingRoom) {
-          setEditingRoom({ ...editingRoom, images: [...(editingRoom.images || []), r.result] });
-        } else {
-          setNewRoom({ ...newRoom, images: [...(newRoom.images || []), r.result] });
-        }
-      };
-      r.readAsDataURL(file);
+      const dataUrl = await fileToBase64(file, 1400, 1400, 0.8);
+      if (editingRoom) {
+        setEditingRoom({ ...editingRoom, images: [...(editingRoom.images || []), dataUrl] });
+      } else {
+        setNewRoom({ ...newRoom, images: [...(newRoom.images || []), dataUrl] });
+      }
     }
   };
 
@@ -2501,9 +2510,12 @@ function FleetTab({ bikes, models, auth, fetchAll, inputCls, labelCls, cardCls, 
   const [modelForm, setModelForm] = useState({ name: '', description: '', price: '' });
   const [bikeForm, setBikeForm] = useState({ modelId: '', plateNumber: '', color: '', chassisNumber: '', status: 'Available', imageUrl: '' });
 
-  const handleImageUpload = (e, setter, current) => {
+  const handleImageUpload = async (e, setter, current) => {
     const file = e.target.files[0];
-    if (file) { const r = new FileReader(); r.onloadend = ()=>setter({...current, imageUrl: r.result}); r.readAsDataURL(file); }
+    if (file) {
+      const dataUrl = await fileToBase64(file, 1400, 1400, 0.8);
+      setter({ ...current, imageUrl: dataUrl });
+    }
   };
 
   const handleModelSubmit = async (e) => {
@@ -3033,25 +3045,25 @@ function SettingsTab({
               <div className="col-span-full mt-2">
                 <label className={labelCls}>Hero Slideshow Images (URLs)</label>
                 <div className="space-y-3">
-                  {(settings.hero_images || []).map((imgUrl, i) => (
+                  {(asArray(settings.hero_images)).map((imgUrl, i) => (
                     <div key={i} className="flex gap-2 items-center">
                       <div className="w-12 h-12 shrink-0 bg-stone-100 rounded border border-stone-200 overflow-hidden flex items-center justify-center">
                         {imgUrl ? <img src={imgUrl} alt="Slide" className="w-full h-full object-cover" onError={e=>e.target.style.display='none'}/> : <i className="fa-solid fa-image text-stone-300"></i>}
                       </div>
                       <input 
-                        type="url" 
-                        placeholder="https://..."
+                        type="text" 
+                        placeholder="https://... or /uploads/hero.jpg"
                         className={inputCls} 
-                        value={imgUrl} 
+                        value={typeof imgUrl === 'string' && imgUrl.startsWith('data:') ? '(uploaded image)' : imgUrl} 
                         onChange={e => {
-                          const newImgs = [...(settings.hero_images || [])];
+                          const newImgs = [...asArray(settings.hero_images)];
                           newImgs[i] = e.target.value;
                           setSettings({...settings, hero_images: newImgs});
                         }} 
                       />
                       <button 
                         onClick={() => {
-                          const newImgs = [...(settings.hero_images || [])];
+                          const newImgs = [...asArray(settings.hero_images)];
                           newImgs.splice(i, 1);
                           setSettings({...settings, hero_images: newImgs});
                         }}
@@ -3646,12 +3658,11 @@ function SettingsTab({
                     <input
                       type="file"
                       accept="image/*"
-                      onChange={e => {
+                      onChange={async e => {
                         const f = e.target.files[0];
                         if (f) {
-                          const r = new FileReader();
-                          r.onloadend = () => setSettings({ ...settings, payment_methods: { ...pMethods, abaQrImage: r.result } });
-                          r.readAsDataURL(f);
+                          const dataUrl = await fileToBase64(f, 800, 800, 0.85);
+                          setSettings({ ...settings, payment_methods: { ...pMethods, abaQrImage: dataUrl } });
                         }
                       }}
                       className="w-full text-xs text-stone-500 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-white file:text-blue-700 file:border file:border-blue-200 cursor-pointer"
@@ -4003,7 +4014,7 @@ function DashboardTab({ bikes, models, rentals, bookings, cardCls, loadingData, 
   const rentedBikes = (bikes || []).filter(b => (b.status || '').toLowerCase() === 'rented');
   const repairBikes = (bikes || []).filter(b => ['maintenance', 'repair', 'inactive'].includes((b.status || '').toLowerCase()));
 
-  const todayRentals = (rentals || []).filter(r => (r.startDate || r.checkoutDate || '').substring(0, 10) === todayStr);
+  const todayRentals = (rentals || []).filter(r => toDateStr(r.startDate || r.checkoutDate) === todayStr);
   const todayIncome = todayRentals.reduce((sum, r) => sum + (parseFloat(r.totalPrice || r.pricePerDay || 0)), 0);
   const monthIncome = (rentals || []).reduce((sum, r) => sum + (parseFloat(r.totalPrice || r.pricePerDay || 0)), 0);
 

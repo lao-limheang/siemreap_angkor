@@ -26,12 +26,24 @@ function RoomCard({ room, index }) {
   let images = [];
   if (room.imageUrl) {
     try {
-      images = JSON.parse(room.imageUrl);
+      images = typeof room.imageUrl === 'string' && room.imageUrl.trim().startsWith('[')
+        ? JSON.parse(room.imageUrl)
+        : (Array.isArray(room.imageUrl) ? room.imageUrl : [room.imageUrl]);
       if (!Array.isArray(images)) images = [room.imageUrl];
     } catch {
       images = [room.imageUrl];
     }
   }
+
+  let amenities = room.amenities;
+  if (typeof amenities === 'string') {
+    try {
+      amenities = JSON.parse(amenities);
+    } catch {
+      amenities = amenities.split(',').map(s => s.trim()).filter(Boolean);
+    }
+  }
+  if (!Array.isArray(amenities)) amenities = [];
 
   const nextImg = (e) => {
     e.stopPropagation();
@@ -105,9 +117,9 @@ function RoomCard({ room, index }) {
           </div>
 
           {/* Amenities */}
-          {room.amenities && room.amenities.length > 0 && (
+          {amenities.length > 0 && (
             <div className="grid grid-cols-2 gap-1.5 mb-5">
-              {room.amenities.slice(0, 6).map((a, i) => (
+              {amenities.slice(0, 6).map((a, i) => (
                 <div key={i} className="flex items-center gap-1.5 text-xs text-stone-600">
                   <i className={`fa-solid ${AMENITY_ICONS[a] || 'fa-check'} text-brand-400 text-[10px] w-3 shrink-0`}></i>
                   <span>{a}</span>

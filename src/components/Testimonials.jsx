@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { User, X } from 'lucide-react';
 import { TestimonialsSkeleton } from './Skeleton';
+import { asArray } from '../utils/dataNormalizer';
 
 const TestimonialsColumn = (props) => {
   return (
@@ -69,7 +70,7 @@ const TestimonialsColumn = (props) => {
 };
 
 export default function Testimonials({ data, loading = false }) {
-  const reviews = data || [];
+  const reviews = asArray(data);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [formRating, setFormRating] = useState(0);
   const [hoverRating, setHoverRating] = useState(0);

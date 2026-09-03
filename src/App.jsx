@@ -15,6 +15,7 @@ import Testimonials from './components/Testimonials';
 import GuesthousesPage from './pages/GuesthousesPage';
 import MotorRentalsPage from './pages/MotorRentalsPage';
 import FeedbackPage from './pages/FeedbackPage';
+import { asArray } from './utils/dataNormalizer';
 
 function LandingPage({ publicSettings, loadingSettings }) {
   useEffect(() => {
@@ -128,6 +129,16 @@ function App() {
             }
           }
         });
+        if ('hero_images' in parsed) parsed.hero_images = asArray(parsed.hero_images);
+        if ('testimonials' in parsed) parsed.testimonials = asArray(parsed.testimonials);
+        if ('services_bar' in parsed) parsed.services_bar = asArray(parsed.services_bar);
+        if (parsed.why_us && typeof parsed.why_us === 'object') {
+          parsed.why_us = {
+            ...parsed.why_us,
+            stats: asArray(parsed.why_us.stats),
+            features: asArray(parsed.why_us.features),
+          };
+        }
         setPublicSettings(prev => ({ ...prev, ...parsed }));
       })
       .catch(console.error)

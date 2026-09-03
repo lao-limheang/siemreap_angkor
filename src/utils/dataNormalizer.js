@@ -1,3 +1,44 @@
+/** Convert Firestore timestamps, Date objects, or ISO strings to YYYY-MM-DD. */
+export function toDateStr(value) {
+  if (value == null || value === '') return '';
+
+  const localISODate = (d) => {
+    if (!(d instanceof Date) || Number.isNaN(d.getTime())) return '';
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  if (typeof value === 'number') return localISODate(new Date(value));
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10);
+    const asNum = Number(trimmed);
+    if (trimmed !== '' && Number.isFinite(asNum) && asNum > 1e11) return localISODate(new Date(asNum));
+    return localISODate(new Date(trimmed)) || trimmed.slice(0, 10);
+  }
+  if (value instanceof Date) return localISODate(value);
+  if (typeof value === 'object') {
+    if (typeof value.toDate === 'function') return localISODate(value.toDate());
+    if (typeof value.seconds === 'number') return localISODate(new Date(value.seconds * 1000));
+  }
+  return '';
+}
+
+export function asArray(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
 /**
  * Resolves customer label (name and phone) from customers list.
  */
@@ -36,8 +77,8 @@ export function normalizeRental(r, customers = [], motos = [], models = []) {
   const guestPhone = r.guestPhone || r.customerPhone || customer?.phone || '';
   const bikeName = r.bikeName || r.motoName || (moto ? `${model?.name || moto.name} (${moto.plateNumber || ''})`.trim() : 'Motorbike');
   const plateNumber = r.plateNumber || moto?.plateNumber || '';
-  const startDate = r.startDate || r.checkoutDate || '';
-  const endDate = r.endDate || r.returnDueDate || '';
+  const startDate = toDateStr(r.startDate || r.checkoutDate);
+  const endDate = toDateStr(r.endDate || r.returnDueDate);
   const dailyRate = Number(r.dailyRate || r.pricePerDay || (moto?.price || 15));
   const totalDays = Number(r.totalDays || 1);
   const totalPrice = Number(r.totalPrice || r.totalFee || (dailyRate * totalDays));
@@ -79,8 +120,8 @@ export function normalizeBooking(b, customers = [], motos = [], models = []) {
   const customerName = b.customerName || b.name || customer?.name || 'Guest';
   const phone = b.customerPhone || b.phone || customer?.phone || '';
   const itemName = b.itemName || b.motoName || (moto ? `${model?.name || moto.name} (${moto.plateNumber || ''})`.trim() : (b.modelId || 'Motorbike'));
-  const startDate = b.startDate || b.checkoutDate || '';
-  const endDate = b.endDate || b.returnDueDate || '';
+  const startDate = toDateStr(b.startDate || b.checkoutDate);
+  const endDate = toDateStr(b.endDate || b.returnDueDate);
   const price = Number(b.price || b.pricePerDay || 15);
   const totalDays = Number(b.totalDays || 1);
   const totalFee = Number(b.totalFee || b.totalAmount || (price * totalDays));
@@ -109,7 +150,7 @@ export function normalizeBooking(b, customers = [], motos = [], models = []) {
  * Normalizes a room record from chafe-2026 (hotel_rooms).
  */
 export function normalizeRoom(r) {
-  const num = r.number || r.name || '01';
+  const num = String(r.number || r.name || '01');
   const name = r.name || (num.startsWith('លេខ') ? num : `បន្ទប់ ${num}`);
   const rate = Number(r.rate || r.beds1Price || r.price || 10);
 

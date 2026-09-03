@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { toDateStr } from '../../utils/dataNormalizer';
 
 export default function CalendarTab({ rentals, bookings, cardCls, btnSecondary }) {
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -26,12 +27,12 @@ export default function CalendarTab({ rentals, bookings, cardCls, btnSecondary }
     const pad = n => String(n).padStart(2, '0');
 
     (rentals || []).forEach(r => {
-      const d = r.startDate;
+      const d = toDateStr(r.startDate);
       if (d) {
         if (!map[d]) map[d] = { active: [], returned: [], overdue: [], bookings: [] };
         if (r.status === 'returned') map[d].returned.push(r);
         else {
-          const isOverdue = new Date(r.endDate) < new Date();
+          const isOverdue = r.endDate && new Date(toDateStr(r.endDate)) < new Date();
           if (isOverdue) map[d].overdue.push(r);
           else map[d].active.push(r);
         }
@@ -39,7 +40,7 @@ export default function CalendarTab({ rentals, bookings, cardCls, btnSecondary }
     });
 
     (bookings || []).forEach(b => {
-      const d = b.startDate || (b.createdAt || '').split('T')[0];
+      const d = toDateStr(b.startDate) || toDateStr(b.createdAt);
       if (d) {
         if (!map[d]) map[d] = { active: [], returned: [], overdue: [], bookings: [] };
         map[d].bookings.push(b);
