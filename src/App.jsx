@@ -150,10 +150,10 @@ function App() {
 
   useEffect(() => {
     fetchPublicSettings();
-    // Vercel serves the API as short-lived functions and does not support the
-    // persistent Socket.IO connection used by the local Express server.
-    if (window.location.hostname !== 'localhost') return undefined;
-    const socket = io('http://localhost:3000');
+    const socketUrl = window.location.hostname === 'localhost'
+      ? 'http://localhost:3000'
+      : 'https://siemreap-api.onrender.com';
+    const socket = io(socketUrl);
     socket.on('settings_updated', fetchPublicSettings);
     return () => socket.disconnect();
   }, [fetchPublicSettings]);
