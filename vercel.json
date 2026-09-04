@@ -4,7 +4,7 @@
   "outputDirectory": "dist",
   "functions": {
     "api/index.js": {
-      "includeFiles": "server/app.db"
+      "includeFiles": "server/**"
     }
   },
   "rewrites": [

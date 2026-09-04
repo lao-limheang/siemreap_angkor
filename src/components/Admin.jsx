@@ -315,10 +315,20 @@ export default function Admin() {
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    const res = await fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({username,password}) });
-    const data = await res.json();
-    if (res.ok) { localStorage.setItem('token', data.token); setToken(data.token); setLoginError(''); }
-    else setLoginError(data.error);
+    try {
+      const res = await fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({username,password}) });
+      let data = {};
+      try {
+        data = await res.json();
+      } catch (jsonErr) {
+        setLoginError(`Server returned status ${res.status}. Please check server.`);
+        return;
+      }
+      if (res.ok) { localStorage.setItem('token', data.token); setToken(data.token); setLoginError(''); }
+      else setLoginError(data.error || 'Login failed');
+    } catch (err) {
+      setLoginError(err.message || 'Network error');
+    }
   };
   const handleLogout = () => { localStorage.removeItem('token'); setToken(null); };
 

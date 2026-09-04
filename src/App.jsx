@@ -117,7 +117,10 @@ function App() {
 
   const fetchPublicSettings = useCallback(() => {
     fetch('/api/public-settings')
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+        return res.json();
+      })
       .then(data => {
         const parsed = {};
         ['hero_images', 'about_us', 'why_us', 'services_bar', 'testimonials', 'contact_info', 'business_profile', 'pricing_tax', 'payment_methods', 'invoice_settings', 'public_texts'].forEach(key => {

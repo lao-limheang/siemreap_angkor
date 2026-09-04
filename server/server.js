@@ -20,7 +20,28 @@ const databasePath = process.env.VERCEL
 // Vercel's deployed filesystem is read-only, so each function instance gets
 // a writable temporary copy of the seed database.
 if (process.env.VERCEL && !existsSync(databasePath)) {
-  copyFileSync(join(__dirname, 'app.db'), databasePath);
+  const candidateSeedPaths = [
+    join(process.cwd(), 'server', 'app.db'),
+    join(__dirname, '..', 'server', 'app.db'),
+    join(__dirname, 'app.db'),
+    join(process.cwd(), 'app.db')
+  ];
+  let copied = false;
+  for (const seedPath of candidateSeedPaths) {
+    if (existsSync(seedPath)) {
+      try {
+        copyFileSync(seedPath, databasePath);
+        console.log(`Successfully copied database seed from ${seedPath} to ${databasePath}`);
+        copied = true;
+        break;
+      } catch (copyErr) {
+        console.error(`Error copying from ${seedPath}:`, copyErr);
+      }
+    }
+  }
+  if (!copied) {
+    console.warn("No seed database found to copy to /tmp. SQLite will initialize a fresh database.");
+  }
 }
 
 const app = express();
@@ -1214,6 +1235,12 @@ app.post('/api/settings/test', authenticateToken, async (req, res) => {
   const result = await sendTelegramMessage('✅ <b>Test from Siem Reap Angkor PMS!</b>\nYour Telegram bot notifications are properly configured.');
   if (result.ok) res.json({ success: true });
   else res.status(400).json({ success: false, error: result.reason || result.description });
+});
+
+// Global error handler middleware so Vercel returns JSON instead of crashing
+app.use((err, req, res, next) => {
+  console.error("API error:", err);
+  res.status(500).json({ error: err.message || "Internal server error" });
 });
 
 const PORT = process.env.PORT || 3000;
