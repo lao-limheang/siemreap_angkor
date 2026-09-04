@@ -13,6 +13,7 @@
     "dev": "concurrently \"vite\" \"npm run server\"",
     "server": "node server/server.js",
     "build": "vite build",
+    "render-build": "npm install && npm rebuild sqlite3 --build-from-source",
     "lint": "oxlint",
     "preview": "vite preview"
   },
