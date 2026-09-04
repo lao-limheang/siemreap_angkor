@@ -8,6 +8,7 @@ import { AdminStatsSkeleton, AdminTableSkeleton, AdminChartSkeleton, Skeleton } 
 import {
   MotoService,
   RoomService,
+  BedCategoryService,
   BikeModelService,
   BookingService,
   RentalService,
@@ -32,7 +33,9 @@ import RoomHistoryTab from './admin/RoomHistoryTab';
 import RoomIncomeTab from './admin/RoomIncomeTab';
 import CustomerDocsTab from './admin/CustomerDocsTab';
 import BookingStockTab from './admin/BookingStockTab';
-import { normalizeRental, normalizeBooking, normalizeRoom, normalizeMoto, asArray, toDateStr } from '../utils/dataNormalizer';
+import RoomsTab from './admin/RoomsTab';
+import RoomBookingsTab from './admin/RoomBookingsTab';
+import { normalizeRental, normalizeBooking, normalizeRoom, normalizeMoto, normalizeBedCategory, asArray, toDateStr } from '../utils/dataNormalizer';
 import { fileToBase64 } from '../utils/imageUtils';
 import PaginationControls from './common/PaginationControls';
 
@@ -60,6 +63,7 @@ const statusBadge = {
 const NAV = [
   { id: 'dashboard',         label: 'Dashboard',         icon: 'fa-table-cells-large',   section: 'ទិដ្ឋភាពទូទៅ' },
   { id: 'rooms',             label: 'Rooms',             icon: 'fa-building',            section: 'បន្ទប់' },
+  { id: 'room-bookings',     label: 'Room Bookings',     icon: 'fa-calendar-check',      section: 'បន្ទប់' },
   { id: 'room-history',      label: 'Room History',      icon: 'fa-clock-rotate-left',   section: 'បន្ទប់' },
   { id: 'room-income',       label: 'Room Income',       icon: 'fa-hand-holding-dollar', section: 'បន្ទប់' },
   { id: 'fleet',             label: 'Bikes',             icon: 'fa-motorcycle',          section: 'ម៉ូតូ & អតិថិជន' },
@@ -110,6 +114,7 @@ export default function Admin() {
   const [bikes,       setBikes]       = useState([]);
   const [models,      setModels]      = useState([]);
   const [rooms,       setRooms]       = useState([]);
+  const [bedCategories, setBedCategories] = useState([]);
   const [bookings,    setBookings]    = useState([]);
   const [occupancy,   setOccupancy]   = useState([]);
   const [rentals,     setRentals]     = useState([]);
@@ -154,7 +159,7 @@ export default function Admin() {
     if (!token) return;
     try {
       const hdrs = { headers: { 'Content-Type':'application/json', 'Authorization': `Bearer ${token}` } };
-      const [b, mdls, r, bk, oc, rn, inv, hk, mnt, g, stf, logs] = await Promise.all([
+      const [b, mdls, r, bk, oc, rn, inv, hk, mnt, g, stf, logs, cats] = await Promise.all([
         MotoService.getAll().catch(()=>[]),
         BikeModelService.getAll().catch(()=>[]),
         RoomService.getAll().catch(()=>[]),
@@ -167,16 +172,19 @@ export default function Admin() {
         CustomerService.getAll().then(res => res && res.length ? res : fetch('/api/guests', hdrs).then(r=>r.json()).catch(()=>[])).catch(()=>[]),
         fetch('/api/staff', hdrs).then(r=>r.json()).catch(()=>[]),
         fetch('/api/audit-logs', hdrs).then(r=>r.json()).catch(()=>[]),
+        BedCategoryService.getAll().then(res => res && res.length ? res : fetch('/api/bed-categories', hdrs).then(r=>r.json()).catch(()=>[])).catch(()=>[]),
       ]);
       const safeGuests = Array.isArray(g) ? g : [];
       const safeModels = Array.isArray(mdls) ? mdls : [];
+      const safeCategories = mapSafe(cats, normalizeBedCategory);
       const safeBikes = mapSafe(b, x => normalizeMoto(x, safeModels));
-      const safeRooms = mapSafe(r, normalizeRoom);
+      const safeRooms = mapSafe(r, x => normalizeRoom(x, safeCategories));
       const safeRentals = mapSafe(rn, x => normalizeRental(x, safeGuests, safeBikes, safeModels));
       const safeBookings = mapSafe(bk, x => normalizeBooking(x, safeGuests, safeBikes, safeModels));
 
       setGuests(safeGuests);
       setModels(safeModels);
+      setBedCategories(safeCategories);
       setBikes(safeBikes);
       setRooms(safeRooms);
       setRentals(safeRentals);
@@ -282,7 +290,14 @@ export default function Admin() {
     });
     const unsubRooms = RoomService.subscribe((firestoreRooms) => {
       if (firestoreRooms && firestoreRooms.length > 0) {
-        setRooms(mapSafe(firestoreRooms, normalizeRoom));
+        setRooms(prevRooms => mapSafe(firestoreRooms, x => normalizeRoom(x, bedCategories)));
+      }
+    });
+    const unsubBedCategories = BedCategoryService.subscribe((firestoreCats) => {
+      if (firestoreCats && firestoreCats.length > 0) {
+        const safeCats = mapSafe(firestoreCats, normalizeBedCategory);
+        setBedCategories(safeCats);
+        setRooms(prevRooms => mapSafe(prevRooms, x => normalizeRoom(x, safeCats)));
       }
     });
     const unsubMaintenance = MaintenanceService.subscribe((firestoreMaint) => {
@@ -295,6 +310,7 @@ export default function Admin() {
     const socket = io(socketUrl);
     socket.on('new_booking', () => { fetchAll(); fetchDash(); setNewBookingAlert(true); setTimeout(()=>setNewBookingAlert(false),5000); });
     socket.on('room_status_updated', () => { fetchAll(); fetchDash(); });
+    socket.on('bed_categories_updated', () => { fetchAll(); });
     socket.on('bike_status_updated', () => { fetchAll(); fetchDash(); });
     socket.on('booking_updated', () => { fetchAll(); });
     socket.on('settings_updated', () => { fetchSettings(); });
@@ -306,6 +322,7 @@ export default function Admin() {
       unsubBookings();
       unsubCustomers();
       unsubRooms();
+      unsubBedCategories();
       unsubMaintenance();
       socket.disconnect();
     };
@@ -438,13 +455,32 @@ export default function Admin() {
           {sections.map(section => (
             <div key={section}>
               <p className="px-3.5 text-[10px] font-bold text-stone-400 uppercase tracking-wider mb-2 mt-3">{section}</p>
-              {NAV.filter(n=>n.section===section).map(n => (
-                <button key={n.id} onClick={()=>setActiveTab(n.id)}
-                  className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-[13px] font-semibold transition-all mb-1 ${activeTab===n.id ? 'bg-brand-500 text-white shadow-xs font-bold' : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100/70'}`}>
-                  <i className={`fa-solid ${n.icon} w-5 text-center text-sm opacity-90`}></i>
-                  {n.label}
-                </button>
-              ))}
+              {NAV.filter(n=>n.section===section).map(n => {
+                const isRoomBk = n.id === 'room-bookings';
+                const isMotorBk = n.id === 'bookings';
+                const pendingCount = isRoomBk
+                  ? bookings.filter(b => (b.type === 'room' || b.roomId || String(b.itemName || '').toLowerCase().includes('room')) && (b.status || 'pending') === 'pending').length
+                  : isMotorBk
+                  ? bookings.filter(b => b.type !== 'room' && !b.roomId && !String(b.itemName || '').toLowerCase().includes('room') && (b.status || 'pending') === 'pending').length
+                  : 0;
+
+                return (
+                  <button key={n.id} onClick={()=>setActiveTab(n.id)}
+                    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-[13px] font-semibold transition-all mb-1 ${activeTab===n.id ? 'bg-brand-500 text-white shadow-xs font-bold' : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100/70'}`}>
+                    <div className="flex items-center gap-3">
+                      <i className={`fa-solid ${n.icon} w-5 text-center text-sm opacity-90`}></i>
+                      <span>{n.label}</span>
+                    </div>
+                    {pendingCount > 0 && (
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-black tracking-wider ${
+                        activeTab === n.id ? 'bg-white text-stone-900 shadow-xs' : 'bg-amber-500 text-white animate-pulse'
+                      }`}>
+                        {pendingCount}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           ))}
         </nav>
@@ -504,7 +540,35 @@ export default function Admin() {
             loadingData ? (
               <AdminTableSkeleton rows={7} cols={6} />
             ) : (
-              <RoomsTab rooms={rooms} occupancy={occupancy} auth={auth} fetchAll={fetchAll} fetchDash={fetchDash} inputCls={inputCls} labelCls={labelCls} cardCls={cardCls} btnPrimary={btnPrimary} btnSecondary={btnSecondary} btnDanger={btnDanger} statusBadge={statusBadge} today={today} currency={currency} />
+              <RoomsTab bookings={bookings} setBookings={setBookings} rooms={rooms} bedCategories={bedCategories} occupancy={occupancy} auth={auth} fetchAll={fetchAll} fetchDash={fetchDash} inputCls={inputCls} labelCls={labelCls} cardCls={cardCls} btnPrimary={btnPrimary} btnSecondary={btnSecondary} btnDanger={btnDanger} statusBadge={statusBadge} today={today} currency={currency} />
+            )
+          )}
+
+          {/* ═══════════════════════════════════════════════════════════════ */}
+          {/* ROOM BOOKINGS (Customer Online & Direct Room Bookings)        */}
+          {/* ═══════════════════════════════════════════════════════════════ */}
+          {activeTab === 'room-bookings' && (
+            loadingData ? (
+              <AdminTableSkeleton rows={7} cols={6} />
+            ) : (
+              <RoomBookingsTab
+                bookings={bookings}
+                setBookings={setBookings}
+                rooms={rooms}
+                bedCategories={bedCategories}
+                auth={auth}
+                fetchAll={fetchAll}
+                fetchDash={fetchDash}
+                inputCls={inputCls}
+                labelCls={labelCls}
+                cardCls={cardCls}
+                btnPrimary={btnPrimary}
+                btnSecondary={btnSecondary}
+                btnDanger={btnDanger}
+                statusBadge={statusBadge}
+                today={today}
+                currency={currency}
+              />
             )
           )}
 
@@ -1106,7 +1170,10 @@ export default function Admin() {
           {activeTab === 'room-history' && (
             <RoomHistoryTab
               occupancy={occupancy}
+              bookings={bookings}
               rooms={rooms}
+              auth={auth}
+              fetchAll={fetchAll}
               cardCls={cardCls}
               inputCls={inputCls}
               btnSecondary={btnSecondary}
@@ -1147,459 +1214,7 @@ export default function Admin() {
 //  ROOMS TAB (Occupancy + Room Types Catalog CRUD)
 // ══════════════════════════════════════════════════════════════════════════════
 
-function RoomsTab({ rooms, occupancy, auth, fetchAll, fetchDash, inputCls, labelCls, cardCls, btnPrimary, btnSecondary, btnDanger, statusBadge, today, currency }) {
-  const [subSection, setSubSection] = useState('occupancy'); // 'occupancy' | 'catalog'
-  
-  // Check-in form state
-  const [form, setForm] = useState({ roomId:'', guestName:'', guestPhone:'', guestNationality:'', bedCount:1, checkInDate: today(), checkOutDate:'', notes:'' });
-  
-  // Room Catalog CRUD state
-  const [editingRoom, setEditingRoom] = useState(null);
-  const [newRoom, setNewRoom] = useState({
-    name: '', description: '', floor: '1',
-    beds1Price: 25, beds2Price: 35, beds3Price: 45,
-    amenities: ['Air Conditioning', 'Free Wi-Fi', 'Private Bathroom', 'Hot Shower'],
-    policies: { checkin: '2:00 PM', checkout: '12:00 PM', cancellation: 'Free cancellation up to 24h' },
-    images: []
-  });
-
-  const ALL_AMENITIES = ['Air Conditioning', 'Free Wi-Fi', 'Private Bathroom', 'Hot Shower', 'Flat-screen TV', 'Mini Fridge', 'Daily Housekeeping', 'Balcony / Terrace', 'Safety Deposit Box'];
-
-  const activeOccupancy = occupancy.filter(o => o.status === 'checked_in');
-
-  // Check-in handlers
-  const handleCheckIn = async (e) => {
-    e.preventDefault();
-    await fetch('/api/room-occupancy', { method:'POST', ...auth, body: JSON.stringify(form) });
-    fetchAll(); fetchDash();
-    setForm({ roomId:'', guestName:'', guestPhone:'', guestNationality:'', bedCount:1, checkInDate:today(), checkOutDate:'', notes:'' });
-  };
-  const handleCheckOut = async (id) => {
-    if (!await showConfirm('Confirm Check-out', 'Are you sure you want to check out this guest?', 'Check Out', 'warning')) return;
-    await fetch(`/api/room-occupancy/${id}/checkout`, { method:'PATCH', ...auth });
-    fetchAll(); fetchDash();
-  };
-  const handleStatusChange = async (roomId, status) => {
-    await fetch(`/api/rooms/${roomId}/status`, { method:'PATCH', ...auth, body: JSON.stringify({ status }) });
-    fetchAll(); fetchDash();
-  };
-
-  // Room Catalog Handlers
-  const handleRoomImageUpload = async (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const dataUrl = await fileToBase64(file, 1400, 1400, 0.8);
-      if (editingRoom) {
-        setEditingRoom({ ...editingRoom, images: [...(editingRoom.images || []), dataUrl] });
-      } else {
-        setNewRoom({ ...newRoom, images: [...(newRoom.images || []), dataUrl] });
-      }
-    }
-  };
-
-  const handleSaveRoom = async (e) => {
-    e.preventDefault();
-    try {
-      if (editingRoom) {
-        await RoomService.update(editingRoom.id, editingRoom);
-        setEditingRoom(null);
-      } else {
-        await RoomService.create(newRoom);
-        setNewRoom({
-          name: '', description: '', floor: '1',
-          beds1Price: 25, beds2Price: 35, beds3Price: 45,
-          amenities: ['Air Conditioning', 'Free Wi-Fi', 'Private Bathroom', 'Hot Shower'],
-          policies: { checkin: '2:00 PM', checkout: '12:00 PM', cancellation: 'Free cancellation up to 24h' },
-          images: []
-        });
-      }
-      fetchAll(); fetchDash();
-    } catch (err) {
-      showModal('error', 'Validation Error', err.message);
-    }
-  };
-
-  const handleDeleteRoom = async (id) => {
-    if (!await showConfirm('Delete Room', 'Are you sure you want to delete this room? This will also remove it from the public website.', 'Delete', 'danger')) return;
-    try {
-      await RoomService.delete(id);
-      fetchAll(); fetchDash();
-    } catch (err) {
-      showModal('error', 'Error', err.message);
-    }
-  };
-
-  const currentRoom = editingRoom || newRoom;
-  const setRoomState = editingRoom ? setEditingRoom : setNewRoom;
-
-  const statusColors = { vacant:'bg-emerald-100 text-emerald-700 border-emerald-200 hover:border-emerald-400', occupied:'bg-blue-100 text-blue-700 border-blue-200', cleaning:'bg-amber-100 text-amber-700 border-amber-200 hover:border-amber-400', maintenance:'bg-red-100 text-red-700 border-red-200 hover:border-red-400' };
-  const statusIcons  = { vacant:'fa-check-circle', occupied:'fa-user', cleaning:'fa-broom', maintenance:'fa-wrench' };
-
-  return (
-    <div className="space-y-6">
-      {/* Sub navigation switch */}
-      <div className="flex items-center gap-2 p-1 bg-stone-200/70 rounded-xl w-fit">
-        <button
-          type="button"
-          onClick={() => setSubSection('occupancy')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
-            subSection === 'occupancy' ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-600 hover:text-stone-900'
-          }`}
-        >
-          <i className="fa-solid fa-bed text-brand-500"></i> Check-in & Occupancy (ការកក់ និង Check-in)
-        </button>
-        <button
-          type="button"
-          onClick={() => setSubSection('catalog')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
-            subSection === 'catalog' ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-600 hover:text-stone-900'
-          }`}
-        >
-          <i className="fa-solid fa-list-check text-indigo-500"></i> Manage Room Types & Catalog (គ្រប់គ្រងបន្ទប់ និងតម្លៃ)
-        </button>
-      </div>
-
-      {/* ───────────────────────────────────────────────────────────────────── */}
-      {/* 1. OCCUPANCY & CHECK-IN */}
-      {/* ───────────────────────────────────────────────────────────────────── */}
-      {subSection === 'occupancy' && (
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-          {/* Check-in form */}
-          <div className={`${cardCls} p-6 h-fit sticky top-8`}>
-            <h3 className="font-bold text-stone-900 mb-5"><i className="fa-solid fa-right-to-bracket mr-2 text-emerald-500"></i>New Check-in</h3>
-            <form onSubmit={handleCheckIn} className="space-y-4 text-sm">
-              <div>
-                <label className={labelCls}>Room</label>
-                <select value={form.roomId} onChange={e=>setForm({...form,roomId:e.target.value})} className={inputCls} required>
-                  <option value="">Select room...</option>
-                  {rooms.filter(r=>r.status==='vacant').map(r=><option key={r.id} value={r.id}>Room {r.name} — {r.status}</option>)}
-                </select>
-              </div>
-              <div><label className={labelCls}>Guest Name</label><input type="text" value={form.guestName} onChange={e=>setForm({...form,guestName:e.target.value})} className={inputCls} required /></div>
-              <div><label className={labelCls}>Phone</label><input type="text" value={form.guestPhone} onChange={e=>setForm({...form,guestPhone:e.target.value})} className={inputCls} /></div>
-              <div><label className={labelCls}>Nationality</label><input type="text" value={form.guestNationality} onChange={e=>setForm({...form,guestNationality:e.target.value})} className={inputCls} /></div>
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className={labelCls}>Beds</label><input type="number" min="1" max="3" value={form.bedCount} onChange={e=>setForm({...form,bedCount:parseInt(e.target.value)})} className={inputCls} /></div>
-                <div><label className={labelCls}>Check-in Date</label><input type="date" value={form.checkInDate} onChange={e=>setForm({...form,checkInDate:e.target.value})} className={inputCls} required /></div>
-              </div>
-              <div><label className={labelCls}>Check-out Date</label><input type="date" value={form.checkOutDate} onChange={e=>setForm({...form,checkOutDate:e.target.value})} className={inputCls} required /></div>
-              <div><label className={labelCls}>Notes</label><textarea rows="2" value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} className={inputCls}></textarea></div>
-              <button type="submit" className={`${btnPrimary} w-full justify-center`}>Check In Guest</button>
-            </form>
-          </div>
-
-          {/* Room grid + active stays */}
-          <div className="xl:col-span-2 space-y-6">
-            {/* Room status grid */}
-            <div className={`${cardCls} p-6`}>
-              <h3 className="font-bold text-stone-900 mb-5">Room Status Overview</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {rooms.map(room => {
-                  const occ = activeOccupancy.find(o=>o.roomId===room.id);
-                  return (
-                    <div key={room.id} className={`rounded-2xl border-2 p-4 transition-all ${statusColors[room.status]||statusColors.vacant}`}>
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-lg font-black">Room {room.name}</span>
-                        <i className={`fa-solid ${statusIcons[room.status]||statusIcons.vacant}`}></i>
-                      </div>
-                      <p className="text-xs font-bold capitalize mb-3">{room.status}</p>
-                      {occ && <p className="text-xs font-bold truncate mb-3">{occ.guestName}</p>}
-                      {occ && <p className="text-xs opacity-70">Out: {occ.checkOutDate}</p>}
-                      <div className="mt-3 flex flex-wrap gap-1">
-                        {['vacant','occupied','cleaning','maintenance'].filter(s=>s!==room.status).map(s => (
-                          <button key={s} onClick={()=>handleStatusChange(room.id,s)} className="text-[10px] font-bold px-1.5 py-0.5 bg-white/60 hover:bg-white rounded capitalize transition-colors">
-                            → {s}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Active stays */}
-            <div className={`${cardCls} overflow-hidden`}>
-              <div className="p-5 border-b border-stone-100">
-                <h3 className="font-bold text-stone-900">Active Stays ({activeOccupancy.length})</h3>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left">
-                  <thead className="bg-stone-50 border-b border-stone-100 text-xs text-stone-500 uppercase tracking-wider">
-                    <tr>{['Room','Guest','Nationality','Phone','Check-in','Check-out','Actions'].map(h=><th key={h} className="px-4 py-3 font-bold">{h}</th>)}</tr>
-                  </thead>
-                  <tbody>
-                    {activeOccupancy.map(o => (
-                      <tr key={o.id} className="border-b border-stone-100 hover:bg-stone-50">
-                        <td className="px-4 py-3 font-bold text-blue-600">{o.roomName}</td>
-                        <td className="px-4 py-3 font-bold">{o.guestName}</td>
-                        <td className="px-4 py-3 text-stone-500">{o.guestNationality||'—'}</td>
-                        <td className="px-4 py-3 font-mono text-xs">{o.guestPhone||'—'}</td>
-                        <td className="px-4 py-3 text-xs">{o.checkInDate}</td>
-                        <td className="px-4 py-3 text-xs">{o.checkOutDate}</td>
-                        <td className="px-4 py-3">
-                          <button onClick={()=>handleCheckOut(o.id)} className="text-xs font-bold px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors whitespace-nowrap">Check Out</button>
-                        </td>
-                      </tr>
-                    ))}
-                    {activeOccupancy.length===0&&<tr><td colSpan="7" className="py-12 text-center text-stone-400">No active check-ins.</td></tr>}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ───────────────────────────────────────────────────────────────────── */}
-      {/* 2. ROOM CATALOG & PRICING CRUD */}
-      {/* ───────────────────────────────────────────────────────────────────── */}
-      {subSection === 'catalog' && (
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-          {/* Room Form */}
-          <div className={`${cardCls} p-6 h-fit sticky top-8`}>
-            <div className="flex items-center justify-between mb-5 pb-3 border-b border-stone-100">
-              <h3 className="font-bold text-lg text-stone-900">
-                <i className="fa-solid fa-hotel mr-2 text-indigo-500"></i>
-                {editingRoom ? `Edit Room ${editingRoom.name}` : 'Add New Room'}
-              </h3>
-              {editingRoom && (
-                <button
-                  type="button"
-                  onClick={() => setEditingRoom(null)}
-                  className="text-xs font-bold text-stone-400 hover:text-stone-700"
-                >
-                  Cancel Edit
-                </button>
-              )}
-            </div>
-
-            <form onSubmit={handleSaveRoom} className="space-y-4 text-sm">
-              <div className="grid grid-cols-3 gap-3">
-                <div className="col-span-2">
-                  <label className={labelCls}>Room Name / Number</label>
-                  <input
-                    type="text"
-                    value={currentRoom.name}
-                    onChange={e => setRoomState({ ...currentRoom, name: e.target.value })}
-                    placeholder="e.g. 101 or Deluxe Suite"
-                    className={inputCls}
-                    required
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>Floor</label>
-                  <input
-                    type="text"
-                    value={currentRoom.floor || '1'}
-                    onChange={e => setRoomState({ ...currentRoom, floor: e.target.value })}
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className={labelCls}>Room Description</label>
-                <textarea
-                  rows="2"
-                  value={currentRoom.description}
-                  onChange={e => setRoomState({ ...currentRoom, description: e.target.value })}
-                  placeholder="Cozy room with garden view, private hot shower..."
-                  className={inputCls}
-                  required
-                ></textarea>
-              </div>
-
-              {/* Bed Rates */}
-              <div className="p-4 bg-stone-50 rounded-xl border border-stone-200 space-y-3">
-                <label className={labelCls}>Nightly Rates by Bed Configuration</label>
-                <div className="grid grid-cols-3 gap-2">
-                  <div>
-                    <span className="text-[10px] font-bold text-stone-500 uppercase">1 Bed ($)</span>
-                    <input
-                      type="number"
-                      value={currentRoom.beds1Price}
-                      onChange={e => setRoomState({ ...currentRoom, beds1Price: parseFloat(e.target.value) })}
-                      className={inputCls}
-                      required
-                    />
-                  </div>
-                  <div>
-                    <span className="text-[10px] font-bold text-stone-500 uppercase">2 Beds ($)</span>
-                    <input
-                      type="number"
-                      value={currentRoom.beds2Price}
-                      onChange={e => setRoomState({ ...currentRoom, beds2Price: parseFloat(e.target.value) })}
-                      className={inputCls}
-                      required
-                    />
-                  </div>
-                  <div>
-                    <span className="text-[10px] font-bold text-stone-500 uppercase">3 Beds ($)</span>
-                    <input
-                      type="number"
-                      value={currentRoom.beds3Price}
-                      onChange={e => setRoomState({ ...currentRoom, beds3Price: parseFloat(e.target.value) })}
-                      className={inputCls}
-                      required
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Amenities Checklist */}
-              <div>
-                <label className={labelCls}>Room Amenities</label>
-                <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto p-2 bg-stone-50 rounded-xl border border-stone-200 text-xs">
-                  {ALL_AMENITIES.map(amenity => {
-                    const checked = (currentRoom.amenities || []).includes(amenity);
-                    return (
-                      <label key={amenity} className="flex items-center gap-2 cursor-pointer p-1 rounded hover:bg-white">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={e => {
-                            const cur = currentRoom.amenities || [];
-                            const updated = e.target.checked ? [...cur, amenity] : cur.filter(a => a !== amenity);
-                            setRoomState({ ...currentRoom, amenities: updated });
-                          }}
-                          className="w-4 h-4 accent-brand-500 rounded"
-                        />
-                        <span>{amenity}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Photos Upload */}
-              <div>
-                <label className={labelCls}>Upload Room Photos</label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleRoomImageUpload}
-                  className="w-full text-xs text-stone-500 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-brand-50 file:text-brand-600 hover:file:bg-brand-100 cursor-pointer"
-                />
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {(currentRoom.images || []).map((img, i) => (
-                    <div key={i} className="relative group w-14 h-14 rounded-lg overflow-hidden border border-stone-200">
-                      <img src={img} alt="Room Photo" className="w-full h-full object-cover" />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const a = [...currentRoom.images];
-                          a.splice(i, 1);
-                          setRoomState({ ...currentRoom, images: a });
-                        }}
-                        className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs"
-                      >
-                        <i className="fa-solid fa-times"></i>
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="pt-2 flex gap-3">
-                <button type="submit" className={`${btnPrimary} flex-1 justify-center`}>
-                  {editingRoom ? 'Update Room' : 'Add Room to Catalog'}
-                </button>
-                {editingRoom && (
-                  <button type="button" onClick={() => setEditingRoom(null)} className={btnSecondary}>
-                    Cancel
-                  </button>
-                )}
-              </div>
-            </form>
-          </div>
-
-          {/* Room Catalog Table */}
-          <div className="xl:col-span-2">
-            <div className={`${cardCls} overflow-hidden`}>
-              <div className="p-5 border-b border-stone-100 flex items-center justify-between">
-                <div>
-                  <h3 className="font-bold text-stone-900">Room Types Catalog ({rooms.length} rooms)</h3>
-                  <p className="text-xs text-stone-500">Rooms displayed to customers on the public booking section</p>
-                </div>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left">
-                  <thead className="bg-stone-50 border-b border-stone-100 text-xs text-stone-500 uppercase tracking-wider">
-                    <tr>
-                      {['Photo', 'Room Name', 'Floor', 'Bed Rates (1/2/3)', 'Status', 'Actions'].map(h => (
-                        <th key={h} className="px-4 py-3 font-bold">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rooms.map(room => {
-                      const roomImgs = Array.isArray(room.images) ? room.images : (room.imageUrl ? [room.imageUrl] : []);
-                      return (
-                        <tr key={room.id} className="border-b border-stone-100 hover:bg-stone-50 transition-colors">
-                          <td className="px-4 py-3">
-                            <img
-                              src={roomImgs[0] || 'https://images.unsplash.com/photo-1590490360182-c33d57733427?w=300&q=80'}
-                              alt={room.name}
-                              className="w-12 h-12 rounded-xl object-cover bg-stone-100 border border-stone-200"
-                            />
-                          </td>
-                          <td className="px-4 py-3">
-                            <p className="font-bold text-stone-900">Room {room.name}</p>
-                            <p className="text-xs text-stone-400 max-w-xs truncate">{room.description}</p>
-                          </td>
-                          <td className="px-4 py-3 text-xs font-bold text-stone-600">Floor {room.floor || '1'}</td>
-                          <td className="px-4 py-3">
-                            <div className="text-xs font-mono">
-                              <span className="text-emerald-700 font-bold">${room.beds1Price}</span> /{' '}
-                              <span className="text-blue-700 font-bold">${room.beds2Price}</span> /{' '}
-                              <span className="text-purple-700 font-bold">${room.beds3Price}</span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className={`text-xs font-bold px-2 py-0.5 rounded-full capitalize ${statusColors[room.status] || 'bg-stone-100 text-stone-600'}`}>
-                              {room.status}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                onClick={() => {
-                                  setEditingRoom({
-                                    ...room,
-                                    images: Array.isArray(room.images) ? room.images : (room.imageUrl ? [room.imageUrl] : []),
-                                    amenities: Array.isArray(room.amenities) ? room.amenities : []
-                                  });
-                                }}
-                                className="w-8 h-8 flex items-center justify-center text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
-                              >
-                                <i className="fa-solid fa-pen text-xs"></i>
-                              </button>
-                              <button
-                                onClick={() => handleDeleteRoom(room.id)}
-                                className="w-8 h-8 flex items-center justify-center text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
-                              >
-                                <i className="fa-solid fa-trash text-xs"></i>
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                    {rooms.length === 0 && (
-                      <tr><td colSpan="6" className="py-12 text-center text-stone-400">No rooms configured yet.</td></tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+// RoomsTab is now modularized in ./admin/RoomsTab.jsx
 
 function RentalsTab({ bikes, rentals, occupancy, auth, fetchAll, inputCls, labelCls, cardCls, btnPrimary, btnSecondary, btnDanger, statusBadge, today, currency }) {
   const [form, setForm] = useState({ bikeId:'', guestName:'', guestPhone:'', guestNationality:'', deposit:0, depositType:'cash', linkedRoomOccupancyId:'', startDate:today(), endDate:'', dailyRate:'', preCondition:'' });

@@ -81,6 +81,20 @@ const db = new sqlite3.Database(databasePath, (err) => {
       status TEXT DEFAULT 'available'
     )`);
 
+    // Bed categories table
+    db.run(`CREATE TABLE IF NOT EXISTS bed_categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      bedType TEXT,
+      bedCount INTEGER DEFAULT 1,
+      price REAL NOT NULL DEFAULT 25,
+      capacity INTEGER DEFAULT 2,
+      description TEXT,
+      amenities TEXT,
+      imageUrl TEXT,
+      createdAt TEXT DEFAULT (datetime('now'))
+    )`);
+
     // Rooms table
     db.run(`CREATE TABLE IF NOT EXISTS rooms (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -93,8 +107,18 @@ const db = new sqlite3.Database(databasePath, (err) => {
       amenities TEXT,
       policies TEXT,
       status TEXT DEFAULT 'vacant',
-      floor TEXT DEFAULT '1'
-    )`);
+      floor TEXT DEFAULT '1',
+      categoryId INTEGER,
+      bedType TEXT,
+      bedCount INTEGER DEFAULT 1,
+      price REAL DEFAULT 25
+    )`, () => {
+      // Migrate existing rooms table if needed
+      db.run(`ALTER TABLE rooms ADD COLUMN categoryId INTEGER`, () => {});
+      db.run(`ALTER TABLE rooms ADD COLUMN bedType TEXT`, () => {});
+      db.run(`ALTER TABLE rooms ADD COLUMN bedCount INTEGER DEFAULT 1`, () => {});
+      db.run(`ALTER TABLE rooms ADD COLUMN price REAL DEFAULT 25`, () => {});
+    });
 
     // Bookings table (from public website)
     db.run(`CREATE TABLE IF NOT EXISTS bookings (
@@ -113,6 +137,17 @@ const db = new sqlite3.Database(databasePath, (err) => {
     )`, () => {
       // Ensure status column exists if table was already created
       db.run(`ALTER TABLE bookings ADD COLUMN status TEXT DEFAULT 'pending'`, () => {});
+      db.run(`ALTER TABLE bookings ADD COLUMN roomId TEXT`, () => {});
+      db.run(`ALTER TABLE bookings ADD COLUMN roomName TEXT`, () => {});
+      db.run(`ALTER TABLE bookings ADD COLUMN categoryName TEXT`, () => {});
+      db.run(`ALTER TABLE bookings ADD COLUMN bedType TEXT`, () => {});
+      db.run(`ALTER TABLE bookings ADD COLUMN bookingRef TEXT`, () => {});
+      db.run(`ALTER TABLE bookings ADD COLUMN pricePerDay REAL DEFAULT 0`, () => {});
+      db.run(`ALTER TABLE bookings ADD COLUMN totalFee REAL DEFAULT 0`, () => {});
+      db.run(`ALTER TABLE bookings ADD COLUMN paymentMethod TEXT DEFAULT 'cash'`, () => {});
+      db.run(`ALTER TABLE bookings ADD COLUMN arrivalTime TEXT`, () => {});
+      db.run(`ALTER TABLE bookings ADD COLUMN nationality TEXT`, () => {});
+      db.run(`ALTER TABLE bookings ADD COLUMN email TEXT`, () => {});
     });
 
     // Guests CRM
@@ -129,21 +164,51 @@ const db = new sqlite3.Database(databasePath, (err) => {
     )`);
 
     // Room Occupancy (active check-ins)
+    // roomId is nullable — bookings from the public site may not have a matching SQLite room row
     db.run(`CREATE TABLE IF NOT EXISTS room_occupancy (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      roomId INTEGER NOT NULL,
+      roomId INTEGER,
       guestName TEXT NOT NULL,
       guestPhone TEXT,
       guestNationality TEXT,
       bedCount INTEGER DEFAULT 1,
       checkInDate TEXT NOT NULL,
-      checkOutDate TEXT NOT NULL,
+      checkOutDate TEXT,
       actualCheckOut TEXT,
       status TEXT DEFAULT 'checked_in',
       notes TEXT,
-      createdAt TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY(roomId) REFERENCES rooms(id)
+      createdAt TEXT DEFAULT (datetime('now'))
     )`);
+
+    // Migration: recreate room_occupancy without NOT NULL / FK on roomId if needed
+    db.get("SELECT sql FROM sqlite_master WHERE type='table' AND name='room_occupancy'", [], (err, row) => {
+      if (!err && row && (row.sql || '').includes('roomId INTEGER NOT NULL')) {
+        db.serialize(() => {
+          db.run('PRAGMA foreign_keys = OFF');
+          db.run(`CREATE TABLE IF NOT EXISTS room_occupancy_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            roomId INTEGER,
+            guestName TEXT NOT NULL,
+            guestPhone TEXT,
+            guestNationality TEXT,
+            bedCount INTEGER DEFAULT 1,
+            checkInDate TEXT NOT NULL,
+            checkOutDate TEXT,
+            actualCheckOut TEXT,
+            status TEXT DEFAULT 'checked_in',
+            notes TEXT,
+            createdAt TEXT DEFAULT (datetime('now'))
+          )`);
+          db.run(`INSERT OR IGNORE INTO room_occupancy_new SELECT id,roomId,guestName,guestPhone,guestNationality,bedCount,checkInDate,checkOutDate,actualCheckOut,status,notes,createdAt FROM room_occupancy`);
+          db.run(`DROP TABLE room_occupancy`);
+          db.run(`ALTER TABLE room_occupancy_new RENAME TO room_occupancy`);
+          db.run('PRAGMA foreign_keys = ON');
+          console.log('[DB Migration] room_occupancy: removed NOT NULL/FK from roomId');
+        });
+      }
+    });
+
+
 
     // Motorbike Rentals
     db.run(`CREATE TABLE IF NOT EXISTS rentals (
@@ -617,6 +682,67 @@ app.delete('/api/bikes/:id', authenticateToken, (req, res) => {
   });
 });
 
+// ===================== BED CATEGORIES ROUTES =====================
+app.get('/api/bed-categories', (req, res) => {
+  db.all("SELECT * FROM bed_categories ORDER BY id ASC", [], (err, rows) => {
+    if (err) res.status(500).json({ error: err.message });
+    else res.json(rows.map(c => {
+      let amenities = [];
+      try { amenities = typeof c.amenities === 'string' ? JSON.parse(c.amenities || '[]') : c.amenities; } catch { amenities = []; }
+      let images = [];
+      try { images = typeof c.imageUrl === 'string' && c.imageUrl.startsWith('[') ? JSON.parse(c.imageUrl) : (c.imageUrl ? [c.imageUrl] : []); } catch { images = []; }
+      return { ...c, amenities: amenities || [], images, imageUrl: images[0] || c.imageUrl || '' };
+    }));
+  });
+});
+app.post('/api/bed-categories', authenticateToken, (req, res) => {
+  const { name, bedType, bedCount, price, capacity, description, amenities, images, imageUrl } = req.body;
+  let imgs = images;
+  if (!imgs && imageUrl) {
+    try { imgs = typeof imageUrl === 'string' ? JSON.parse(imageUrl) : imageUrl; } catch { imgs = [imageUrl]; }
+  }
+  const imgStr = JSON.stringify(Array.isArray(imgs) ? imgs : (imgs ? [imgs] : []));
+  const amenitiesStr = JSON.stringify(Array.isArray(amenities) ? amenities : []);
+
+  db.run(`INSERT INTO bed_categories (name, bedType, bedCount, price, capacity, description, amenities, imageUrl) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [name, bedType || '', Number(bedCount) || 1, Number(price) || 25, Number(capacity) || 2, description || '', amenitiesStr, imgStr],
+    function(err) {
+      if (err) res.status(500).json({ error: err.message });
+      else {
+        io.emit('bed_categories_updated');
+        res.json({ id: this.lastID });
+      }
+    });
+});
+app.put('/api/bed-categories/:id', authenticateToken, (req, res) => {
+  const { name, bedType, bedCount, price, capacity, description, amenities, images, imageUrl } = req.body;
+  let imgs = images;
+  if (!imgs && imageUrl) {
+    try { imgs = typeof imageUrl === 'string' ? JSON.parse(imageUrl) : imageUrl; } catch { imgs = [imageUrl]; }
+  }
+  const imgStr = JSON.stringify(Array.isArray(imgs) ? imgs : (imgs ? [imgs] : []));
+  const amenitiesStr = JSON.stringify(Array.isArray(amenities) ? amenities : []);
+
+  db.run(`UPDATE bed_categories SET name=?, bedType=?, bedCount=?, price=?, capacity=?, description=?, amenities=?, imageUrl=? WHERE id=?`,
+    [name, bedType || '', Number(bedCount) || 1, Number(price) || 25, Number(capacity) || 2, description || '', amenitiesStr, imgStr, req.params.id],
+    function(err) {
+      if (err) res.status(500).json({ error: err.message });
+      else {
+        io.emit('bed_categories_updated');
+        res.json({ changes: this.changes });
+      }
+    });
+});
+app.delete('/api/bed-categories/:id', authenticateToken, (req, res) => {
+  db.run("DELETE FROM bed_categories WHERE id = ?", req.params.id, function(err) {
+    if (err) res.status(500).json({ error: err.message });
+    else {
+      io.emit('bed_categories_updated');
+      res.json({ changes: this.changes });
+    }
+  });
+});
+
 // ===================== ROOMS ROUTES =====================
 app.get('/api/rooms', (req, res) => {
   db.all("SELECT * FROM rooms ORDER BY id ASC", [], (err, rows) => {
@@ -626,12 +752,14 @@ app.get('/api/rooms', (req, res) => {
       let policies = {};
       try { amenities = typeof r.amenities === 'string' ? JSON.parse(r.amenities || '[]') : r.amenities; } catch { amenities = []; }
       try { policies = typeof r.policies === 'string' ? JSON.parse(r.policies || '{}') : r.policies; } catch { policies = {}; }
-      return { ...r, amenities: amenities || [], policies: policies || {} };
+      let images = [];
+      try { images = typeof r.imageUrl === 'string' && r.imageUrl.startsWith('[') ? JSON.parse(r.imageUrl) : (r.imageUrl ? [r.imageUrl] : []); } catch { images = []; }
+      return { ...r, amenities: amenities || [], policies: policies || {}, images, imageUrl: images[0] || r.imageUrl || '' };
     }));
   });
 });
 app.post('/api/rooms', authenticateToken, (req, res) => {
-  const { name, description, images, imageUrl, beds1Price, beds2Price, beds3Price, amenities, policies, floor } = req.body;
+  const { name, description, images, imageUrl, beds1Price, beds2Price, beds3Price, amenities, policies, floor, categoryId, bedType, bedCount, price } = req.body;
   let imgs = images;
   if (!imgs && imageUrl) {
     try { imgs = typeof imageUrl === 'string' ? JSON.parse(imageUrl) : imageUrl; } catch { imgs = [imageUrl]; }
@@ -639,9 +767,10 @@ app.post('/api/rooms', authenticateToken, (req, res) => {
   const imgStr = JSON.stringify(Array.isArray(imgs) ? imgs : (imgs ? [imgs] : []));
   const amenitiesStr = JSON.stringify(Array.isArray(amenities) ? amenities : []);
   const policiesStr = JSON.stringify(typeof policies === 'object' ? policies : {});
+  const roomPrice = Number(price || beds1Price || 25);
 
-  db.run(`INSERT INTO rooms (name, description, imageUrl, beds1Price, beds2Price, beds3Price, amenities, policies, status, floor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'vacant', ?)`,
-    [name, description || '', imgStr, Number(beds1Price) || 20, Number(beds2Price) || 30, Number(beds3Price) || 40, amenitiesStr, policiesStr, floor || '1'],
+  db.run(`INSERT INTO rooms (name, description, imageUrl, beds1Price, beds2Price, beds3Price, amenities, policies, status, floor, categoryId, bedType, bedCount, price) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'vacant', ?, ?, ?, ?, ?)`,
+    [name, description || '', imgStr, Number(beds1Price) || roomPrice, Number(beds2Price) || (roomPrice + 10), Number(beds3Price) || (roomPrice + 20), amenitiesStr, policiesStr, floor || '1', categoryId || null, bedType || '', Number(bedCount) || 1, roomPrice],
     function(err) {
       if (err) res.status(500).json({ error: err.message });
       else {
@@ -652,7 +781,7 @@ app.post('/api/rooms', authenticateToken, (req, res) => {
     });
 });
 app.put('/api/rooms/:id', authenticateToken, (req, res) => {
-  const { name, description, images, imageUrl, beds1Price, beds2Price, beds3Price, amenities, policies, status, floor } = req.body;
+  const { name, description, images, imageUrl, beds1Price, beds2Price, beds3Price, amenities, policies, status, floor, categoryId, bedType, bedCount, price } = req.body;
   let imgs = images;
   if (!imgs && imageUrl) {
     try { imgs = typeof imageUrl === 'string' ? JSON.parse(imageUrl) : imageUrl; } catch { imgs = [imageUrl]; }
@@ -660,9 +789,10 @@ app.put('/api/rooms/:id', authenticateToken, (req, res) => {
   const imgStr = JSON.stringify(Array.isArray(imgs) ? imgs : (imgs ? [imgs] : []));
   const amenitiesStr = JSON.stringify(Array.isArray(amenities) ? amenities : []);
   const policiesStr = JSON.stringify(typeof policies === 'object' ? policies : {});
+  const roomPrice = Number(price || beds1Price || 25);
 
-  db.run(`UPDATE rooms SET name=?, description=?, imageUrl=?, beds1Price=?, beds2Price=?, beds3Price=?, amenities=?, policies=?, status=?, floor=? WHERE id=?`,
-    [name, description || '', imgStr, Number(beds1Price) || 20, Number(beds2Price) || 30, Number(beds3Price) || 40, amenitiesStr, policiesStr, status || 'vacant', floor || '1', req.params.id],
+  db.run(`UPDATE rooms SET name=?, description=?, imageUrl=?, beds1Price=?, beds2Price=?, beds3Price=?, amenities=?, policies=?, status=?, floor=?, categoryId=?, bedType=?, bedCount=?, price=? WHERE id=?`,
+    [name, description || '', imgStr, Number(beds1Price) || roomPrice, Number(beds2Price) || (roomPrice + 10), Number(beds3Price) || (roomPrice + 20), amenitiesStr, policiesStr, status || 'vacant', floor || '1', categoryId || null, bedType || '', Number(bedCount) || 1, roomPrice, req.params.id],
     function(err) {
       if (err) res.status(500).json({ error: err.message });
       else {
@@ -701,16 +831,51 @@ app.get('/api/room-occupancy', authenticateToken, (req, res) => {
   });
 });
 app.post('/api/room-occupancy', authenticateToken, (req, res) => {
-  const { roomId, guestName, guestPhone, guestNationality, bedCount, checkInDate, checkOutDate, notes } = req.body;
-  db.run(`INSERT INTO room_occupancy (roomId, guestName, guestPhone, guestNationality, bedCount, checkInDate, checkOutDate, notes, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'checked_in')`,
-    [roomId, guestName, guestPhone, guestNationality, bedCount || 1, checkInDate, checkOutDate, notes || ''],
-    function(err) {
-      if (err) { res.status(500).json({ error: err.message }); return; }
-      // Update room status to occupied
-      db.run("UPDATE rooms SET status='occupied' WHERE id=?", [roomId]);
-      io.emit('room_status_updated');
-      res.json({ id: this.lastID });
+  const { roomId, roomName, guestName, guestPhone, guestNationality, bedCount, checkInDate, checkOutDate, notes } = req.body;
+
+  // Helper: do the actual insert once we have a resolved (or null) roomId
+  const doInsert = (resolvedRoomId) => {
+    db.run(
+      `INSERT INTO room_occupancy (roomId, guestName, guestPhone, guestNationality, bedCount, checkInDate, checkOutDate, notes, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'checked_in')`,
+      [resolvedRoomId || null, guestName, guestPhone || '', guestNationality || '', bedCount || 1, checkInDate, checkOutDate, notes || ''],
+      function(err) {
+        if (err) { res.status(500).json({ error: err.message }); return; }
+        // Update room status to occupied (only if we have a valid numeric roomId)
+        if (resolvedRoomId) {
+          db.run("UPDATE rooms SET status='occupied' WHERE id=?", [resolvedRoomId]);
+        }
+        io.emit('room_status_updated');
+        res.json({ id: this.lastID });
+      }
+    );
+  };
+
+  // If roomId is a valid integer, try to use it directly
+  const numericId = parseInt(roomId, 10);
+  if (numericId && !isNaN(numericId)) {
+    // Verify it actually exists in rooms table
+    db.get("SELECT id FROM rooms WHERE id = ?", [numericId], (err, row) => {
+      if (row) {
+        doInsert(numericId);
+      } else if (roomName) {
+        // roomId not found, try to look up by name
+        db.get("SELECT id FROM rooms WHERE name = ? OR name LIKE ?", [roomName, `%${roomName}%`], (e2, r2) => {
+          doInsert(r2 ? r2.id : null);
+        });
+      } else {
+        doInsert(null);
+      }
     });
+  } else if (roomName) {
+    // No numeric roomId — look up room by name
+    db.get("SELECT id FROM rooms WHERE name = ? OR name LIKE ?", [roomName, `%${roomName}%`], (err, row) => {
+      doInsert(row ? row.id : null);
+    });
+  } else {
+    // No roomId, no roomName — insert with null roomId
+    doInsert(null);
+  }
 });
 app.patch('/api/room-occupancy/:id/checkout', authenticateToken, (req, res) => {
   const now = new Date().toISOString();
@@ -875,16 +1040,67 @@ app.get('/api/bookings', authenticateToken, (req, res) => {
   });
 });
 app.post('/api/bookings', async (req, res) => {
-  const { type, itemName, customerName, phone, startDate, endDate, guests, bedCount, specialRequests } = req.body;
-  db.run(`INSERT INTO bookings (type, itemName, customerName, phone, startDate, endDate, guests, bedCount, specialRequests, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
-    [type, itemName, customerName, phone, startDate, endDate, guests || 1, bedCount || 1, specialRequests || ''],
+  const {
+    type,
+    itemName,
+    roomId,
+    roomName,
+    categoryName,
+    bedType,
+    bookingRef,
+    customerName,
+    phone,
+    email,
+    nationality,
+    startDate,
+    endDate,
+    guests,
+    bedCount,
+    pricePerDay,
+    totalFee,
+    paymentMethod,
+    arrivalTime,
+    specialRequests,
+    status
+  } = req.body;
+
+  const bRef = bookingRef || `SR-${type === 'room' ? 'ROOM' : 'BK'}-${Math.floor(10000 + Math.random() * 90000)}`;
+
+  db.run(`INSERT INTO bookings (
+      type, itemName, roomId, roomName, categoryName, bedType, bookingRef,
+      customerName, phone, email, nationality, startDate, endDate, guests,
+      bedCount, pricePerDay, totalFee, paymentMethod, arrivalTime, specialRequests, status
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      type || 'room',
+      itemName,
+      roomId || '',
+      roomName || '',
+      categoryName || '',
+      bedType || '',
+      bRef,
+      customerName,
+      phone,
+      email || '',
+      nationality || '',
+      startDate,
+      endDate,
+      guests || 1,
+      bedCount || 1,
+      pricePerDay || 0,
+      totalFee || 0,
+      paymentMethod || 'cash',
+      arrivalTime || '',
+      specialRequests || '',
+      status || 'confirmed'
+    ],
     async function(err) {
       if (err) { res.status(500).json({ error: err.message }); return; }
       const emoji = type === 'motor' ? '🛵' : '🏨';
-      const msg = `${emoji} <b>New ${type === 'motor' ? 'Motor Rental' : 'Room Booking'}!</b>\n\n📌 <b>${itemName}</b>\n👤 ${customerName}\n📞 ${phone}\n📅 ${startDate} → ${endDate}\n🕒 ${new Date().toLocaleString('en-GB', { timeZone: 'Asia/Phnom_Penh' })}`;
+      const msg = `${emoji} <b>New ${type === 'motor' ? 'Motor Rental' : 'Room Booking'}!</b>\n\n📌 <b>${itemName}</b>\n🔖 Ref: <code>${bRef}</code>\n👤 ${customerName}\n📞 ${phone}\n📅 ${startDate} → ${endDate}\n💰 $${totalFee || pricePerDay || 0} USD\n🕒 ${new Date().toLocaleString('en-GB', { timeZone: 'Asia/Phnom_Penh' })}`;
       await sendTelegramMessage(msg);
       io.emit('new_booking', { message: 'A new booking was submitted.' });
-      res.json({ id: this.lastID, message: 'Booking submitted successfully!' });
+      res.json({ id: this.lastID, bookingRef: bRef, message: 'Booking submitted successfully!' });
     });
 });
 app.put('/api/bookings/:id', authenticateToken, (req, res) => {

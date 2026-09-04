@@ -7,6 +7,7 @@ const NAV_LINKS = [
   { label: 'Home', to: '/' },
   { label: 'Motor Rentals', to: '/motor-rentals' },
   { label: 'Guesthouses', to: '/guesthouses' },
+  { label: 'Book Room', to: '/book-room' },
   { label: 'Services', to: '/#services', hash: '#services' },
   { label: 'About', to: '/#about', hash: '#about' },
   { label: 'Contact', to: '/#contact', hash: '#contact' },

@@ -15,6 +15,7 @@ import Testimonials from './components/Testimonials';
 import GuesthousesPage from './pages/GuesthousesPage';
 import MotorRentalsPage from './pages/MotorRentalsPage';
 import FeedbackPage from './pages/FeedbackPage';
+import BookRoomPage from './pages/BookRoomPage';
 import { asArray } from './utils/dataNormalizer';
 
 function LandingPage({ publicSettings, loadingSettings }) {
@@ -166,6 +167,9 @@ function App() {
       <Route path="/rentals" element={<MotorRentalsPage publicSettings={publicSettings} loadingSettings={loadingSettings} />} />
       <Route path="/feedback" element={<FeedbackPage publicSettings={publicSettings} />} />
       <Route path="/review" element={<FeedbackPage publicSettings={publicSettings} />} />
+      <Route path="/book-room" element={<BookRoomPage publicSettings={publicSettings} loadingSettings={loadingSettings} />} />
+      <Route path="/book-room/:id" element={<BookRoomPage publicSettings={publicSettings} loadingSettings={loadingSettings} />} />
+      <Route path="/booking" element={<BookRoomPage publicSettings={publicSettings} loadingSettings={loadingSettings} />} />
       <Route path="/admin" element={<Admin />} />
     </Routes>
   );

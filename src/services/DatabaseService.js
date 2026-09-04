@@ -94,10 +94,17 @@ export class RoomModel extends BaseModel {
   }
 }
 
+export class BedCategoryModel extends BaseModel {
+  constructor() {
+    super(dbMotos, 'bed_categories');
+  }
+}
+
 export const MotoService = new MotoModel();
 export const BikeModelService = new BikeModelModel();
 export const BookingService = new BookingModel();
 export const RoomService = new RoomModel();
+export const BedCategoryService = new BedCategoryModel();
 
 export const CustomerService = new BaseModel(dbMotos, 'customers');
 export const RentalService = new BaseModel(dbMotos, 'rentals');
@@ -134,11 +141,30 @@ export async function syncBookingToOldSystem(booking) {
     const totalFee = Number(booking.totalFee || booking.totalPrice || (pricePerDay * totalDays));
     const deposit = Number(booking.deposit || 0);
 
+    const isRoom = booking.type === 'room' || Boolean(booking.roomId) || Boolean(booking.roomName);
+
     const payload = {
+      type: isRoom ? 'room' : 'motor',
       customerName: booking.customerName || booking.name || 'Website Guest',
       customerPhone: booking.customerPhone || booking.phone || '',
+      phone: booking.customerPhone || booking.phone || '',
+      email: booking.email || '',
+      nationality: booking.nationality || '',
       motoId: booking.motoId || booking.bikeId || '',
-      motoName: booking.motoName || booking.bikeName || booking.itemName || '',
+      motoName: booking.motoName || booking.bikeName || (!isRoom ? booking.itemName : '') || '',
+      roomId: booking.roomId || '',
+      roomName: booking.roomName || '',
+      categoryName: booking.categoryName || '',
+      bedType: booking.bedType || '',
+      bedCount: Number(booking.bedCount || 1),
+      guests: Number(booking.guests || 1),
+      bookingRef: booking.bookingRef || `SR-${isRoom ? 'ROOM' : 'BK'}-${Math.floor(10000 + Math.random() * 90000)}`,
+      paymentMethod: booking.paymentMethod || 'cash',
+      arrivalTime: booking.arrivalTime || '14:00 - 16:00',
+      specialRequests: booking.specialRequests || booking.note || '',
+      itemName: booking.itemName || (isRoom ? `Room ${booking.roomName || booking.roomId}` : 'Motorbike'),
+      startDate: booking.startDate || booking.checkoutDate || new Date().toISOString().split('T')[0],
+      endDate: booking.endDate || booking.returnDueDate || new Date().toISOString().split('T')[0],
       checkoutDate: booking.checkoutDate || booking.startDate || new Date().toISOString().split('T')[0],
       returnDueDate: booking.returnDueDate || booking.endDate || new Date().toISOString().split('T')[0],
       totalDays: Number(totalDays),
@@ -155,6 +181,9 @@ export async function syncBookingToOldSystem(booking) {
     };
 
     const res = await BookingService.create(payload);
+    if (isRoom) {
+      await HotelBookingService.create(payload).catch(() => {});
+    }
     console.log('Synced booking to chafe-2026 real-time Firestore:', res.id);
     return res;
   } catch (e) {
