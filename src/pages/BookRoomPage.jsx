@@ -3,6 +3,7 @@ import { Link, useSearchParams, useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, CheckCircle2, ShieldCheck, Clock, Calendar, Users, Bed, CreditCard, Sparkles, Phone, MessageCircle } from 'lucide-react';
 import { collection, getDocs } from 'firebase/firestore';
 import { dbRooms } from '../firebase';
+import { createSocket } from '../services/socket';
 import { RoomService, BedCategoryService, syncBookingToOldSystem } from '../services/DatabaseService';
 import { normalizeRoom, normalizeBedCategory } from '../utils/dataNormalizer';
 import Navbar from '../components/Navbar';
@@ -112,6 +113,33 @@ export default function BookRoomPage({ publicSettings, loadingSettings }) {
     };
 
     loadData();
+
+    // Real-time Firestore Subscriptions
+    const unsubRooms = RoomService.subscribe((firestoreRooms) => {
+      if (firestoreRooms && firestoreRooms.length > 0) {
+        setRooms(prev => firestoreRooms.map(r => normalizeRoom(r, categories)));
+      }
+    });
+    const unsubCats = BedCategoryService.subscribe((firestoreCats) => {
+      if (firestoreCats && firestoreCats.length > 0) {
+        const safeCats = firestoreCats.map(normalizeBedCategory);
+        setCategories(safeCats);
+        setRooms(prev => prev.map(r => normalizeRoom(r, safeCats)));
+      }
+    });
+
+    // Real-time Socket.IO Events
+    const socket = createSocket();
+    socket.on('room_status_updated', loadData);
+    socket.on('rooms_updated', loadData);
+    socket.on('room_occupancy_updated', loadData);
+    socket.on('bed_categories_updated', loadData);
+
+    return () => {
+      unsubRooms();
+      unsubCats();
+      socket.disconnect();
+    };
   }, [preselectedRoomId]);
 
   // Selected Room Object
@@ -501,8 +529,9 @@ export default function BookRoomPage({ publicSettings, loadingSettings }) {
                           <Calendar className="w-4 h-4 text-brand-500" />
                           2. Dates of Stay & Guests
                         </label>
-                        <span className="text-xs font-black text-brand-600 bg-brand-50 px-2.5 py-1 rounded-full border border-brand-200">
-                          🌙 {totalNights} Night{totalNights > 1 ? 's' : ''} Stay
+                        <span className="text-xs font-black text-brand-600 bg-brand-50 px-2.5 py-1 rounded-full border border-brand-200 flex items-center gap-1.5">
+                          <i className="fa-solid fa-moon text-[10px]"></i>
+                          <span>{totalNights} Night{totalNights > 1 ? 's' : ''} Stay</span>
                         </span>
                       </div>
 

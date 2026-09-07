@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { io } from 'socket.io-client';
+import { createSocket } from '../services/socket';
 import { ArrowLeft, Search, ShieldCheck, Wrench, Clock, Sparkles } from 'lucide-react';
 import { collection, getDocs } from 'firebase/firestore';
 import { dbMotos as db } from '../firebase';
+import { MotoService, BikeModelService } from '../services/DatabaseService';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import BookingModal from '../components/BookingModal';
@@ -159,11 +161,22 @@ export default function MotorRentalsPage({ publicSettings, loadingSettings }) {
   useEffect(() => {
     window.scrollTo(0, 0);
     fetchBikes();
-    const socketUrl = window.location.hostname === 'localhost' ? 'http://localhost:3000' : '/';
-    const socket = io(socketUrl);
+
+    // 1. Real-time Firestore Subscriptions
+    const unsubMotos = MotoService.subscribe(() => fetchBikes());
+    const unsubModels = BikeModelService.subscribe(() => fetchBikes());
+
+    // 2. Real-time Socket.IO Events
+    const socket = createSocket();
     socket.on('bike_status_updated', fetchBikes);
     socket.on('bikes_updated', fetchBikes);
-    return () => socket.disconnect();
+    socket.on('rental_updated', fetchBikes);
+
+    return () => {
+      unsubMotos();
+      unsubModels();
+      socket.disconnect();
+    };
   }, []);
 
   useEffect(() => {

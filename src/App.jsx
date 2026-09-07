@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import { io } from 'socket.io-client';
+import { createSocket } from './services/socket';
 import { doc, getDoc, setDoc, updateDoc, increment } from 'firebase/firestore';
 import { dbRooms as db } from './firebase';
 import Navbar from './components/Navbar';
@@ -151,10 +152,7 @@ function App() {
 
   useEffect(() => {
     fetchPublicSettings();
-    const socketUrl = window.location.hostname === 'localhost'
-      ? 'http://localhost:3000'
-      : 'https://siemreap-api.onrender.com';
-    const socket = io(socketUrl);
+    const socket = createSocket();
     socket.on('settings_updated', fetchPublicSettings);
     return () => socket.disconnect();
   }, [fetchPublicSettings]);

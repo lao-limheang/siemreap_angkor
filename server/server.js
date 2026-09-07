@@ -208,8 +208,10 @@ const db = new sqlite3.Database(databasePath, (err) => {
       }
     });
 
-
-
+    db.run("ALTER TABLE room_occupancy ADD COLUMN totalPrice REAL", () => {});
+    db.run("ALTER TABLE room_occupancy ADD COLUMN paymentMethod TEXT DEFAULT 'cash'", () => {});
+    db.run("ALTER TABLE rentals ADD COLUMN totalPrice REAL", () => {});
+    db.run("ALTER TABLE rentals ADD COLUMN lateFee REAL DEFAULT 0", () => {});
     // Motorbike Rentals
     db.run(`CREATE TABLE IF NOT EXISTS rentals (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -558,41 +560,63 @@ function escapeHtml(str) {
     .replace(/'/g, '&#039;');
 }
 
-async function sendTelegramMessage(text) {
+async function getTelegramCredentials() {
   return new Promise((resolve) => {
-    db.get("SELECT value FROM settings WHERE key = 'telegram_token'", [], async (err, tokenRow) => {
-      const token = (tokenRow?.value && tokenRow.value.trim()) || process.env.TELEGRAM_BOT_TOKEN;
-      if (!token) { resolve({ ok: false, reason: 'No token configured' }); return; }
-      db.get("SELECT value FROM settings WHERE key = 'telegram_chat_id'", [], async (err2, chatRow) => {
-        const chatId = (chatRow?.value && chatRow.value.trim()) || process.env.TELEGRAM_CHAT_ID;
-        if (!chatId) { resolve({ ok: false, reason: 'No chat ID configured' }); return; }
-        try {
-          let resp = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' })
-          });
-          let result = await resp.json();
-          // If HTML entity parsing fails, retry as plain text
-          if (!result.ok && result.description && result.description.includes('parse entities')) {
-            console.log('Telegram HTML entity parse failed, retrying plain text...');
-            const plainText = text.replace(/<[^>]*>/g, '');
-            resp = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ chat_id: chatId, text: plainText })
-            });
-            result = await resp.json();
+    db.all("SELECT key, value FROM settings WHERE key IN ('telegram_token', 'telegram_chat_id', 'telegram_settings')", [], (err, rows) => {
+      let token = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
+      let chatId = (process.env.TELEGRAM_CHAT_ID || '').trim();
+      if (!err && rows) {
+        rows.forEach(r => {
+          if (r.key === 'telegram_token' && r.value && r.value.trim()) {
+            token = r.value.trim();
           }
-          if (!result.ok) {
-            console.error('Telegram API error:', result);
+          if (r.key === 'telegram_chat_id' && r.value && r.value.trim()) {
+            chatId = r.value.trim();
           }
-          resolve(result);
-        } catch (e) {
-          console.error('Telegram fetch network error:', e);
-          resolve({ ok: false, reason: e.message });
-        }
-      });
+          if (r.key === 'telegram_settings' && r.value) {
+            try {
+              const parsed = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
+              if (parsed && parsed.botToken && parsed.botToken.trim()) token = parsed.botToken.trim();
+              if (parsed && parsed.chatId && parsed.chatId.trim()) chatId = parsed.chatId.trim();
+            } catch (e) {}
+          }
+        });
+      }
+      resolve({ token, chatId });
     });
   });
+}
+
+async function sendTelegramMessage(text) {
+  const { token, chatId } = await getTelegramCredentials();
+  if (!token) return { ok: false, reason: 'No Telegram bot token configured in Settings' };
+  if (!chatId) return { ok: false, reason: 'No Telegram chat ID configured in Settings' };
+  try {
+    let resp = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' })
+    });
+    let result = await resp.json();
+    // If HTML entity parsing fails, retry as plain text
+    if (!result.ok && result.description && result.description.includes('parse entities')) {
+      console.log('Telegram HTML entity parse failed, retrying plain text...');
+      const plainText = text.replace(/<[^>]*>/g, '');
+      resp = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text: plainText })
+      });
+      result = await resp.json();
+    }
+    if (!result.ok) {
+      console.error('Telegram API error:', result);
+    }
+    return result;
+  } catch (e) {
+    console.error('Telegram fetch network error:', e);
+    return { ok: false, reason: e.message };
+  }
 }
 
 // ===================== DASHBOARD STATS =====================
@@ -846,6 +870,18 @@ app.post('/api/room-occupancy', authenticateToken, (req, res) => {
           db.run("UPDATE rooms SET status='occupied' WHERE id=?", [resolvedRoomId]);
         }
         io.emit('room_status_updated');
+        io.emit('room_occupancy_updated');
+
+        // Automatic Telegram Alert for Room Check-in
+        const checkInAlert = `<b>[ROOM CHECK-IN]</b>\n\n` +
+          `Room: <b>${escapeHtml(roomName || (resolvedRoomId ? 'Room #' + resolvedRoomId : 'Unassigned'))}</b>\n` +
+          `Guest: <b>${escapeHtml(guestName)}</b>\n` +
+          `Phone: ${escapeHtml(guestPhone || 'N/A')}\n` +
+          `Dates: ${checkInDate} → ${checkOutDate || 'Open'}\n` +
+          `Beds: ${bedCount || 1}\n` +
+          `Time: ${new Date().toLocaleString('en-GB', { timeZone: 'Asia/Phnom_Penh' })}`;
+        sendTelegramMessage(checkInAlert).catch(e => console.warn('TG checkin alert error:', e));
+
         res.json({ id: this.lastID });
       }
     );
@@ -886,7 +922,67 @@ app.patch('/api/room-occupancy/:id/checkout', authenticateToken, (req, res) => {
       // Set room to cleaning after checkout
       db.run("UPDATE rooms SET status='cleaning' WHERE id=?", [row.roomId]);
       io.emit('room_status_updated');
+      io.emit('room_occupancy_updated');
+
+      // Automatic Telegram Alert for Room Check-out
+      const checkOutAlert = `<b>[ROOM CHECK-OUT]</b>\n\n` +
+        `Guest: <b>${escapeHtml(row.guestName)}</b>\n` +
+        `Room: <b>#${row.roomId || 'N/A'}</b>\n` +
+        `Status: Checked out. Room marked for Cleaning.\n` +
+        `Time: ${new Date().toLocaleString('en-GB', { timeZone: 'Asia/Phnom_Penh' })}`;
+      sendTelegramMessage(checkOutAlert).catch(e => console.warn('TG checkout alert error:', e));
+
       res.json({ success: true });
+    });
+  });
+});
+app.put('/api/room-occupancy/:id', authenticateToken, (req, res) => {
+  const {
+    roomId, guestName, guestPhone, guestNationality, bedCount,
+    checkInDate, checkOutDate, totalPrice, paymentMethod, status, notes
+  } = req.body;
+  db.run(
+    `UPDATE room_occupancy SET
+      roomId = COALESCE(?, roomId),
+      guestName = COALESCE(?, guestName),
+      guestPhone = COALESCE(?, guestPhone),
+      guestNationality = COALESCE(?, guestNationality),
+      bedCount = COALESCE(?, bedCount),
+      checkInDate = COALESCE(?, checkInDate),
+      checkOutDate = COALESCE(?, checkOutDate),
+      totalPrice = COALESCE(?, totalPrice),
+      paymentMethod = COALESCE(?, paymentMethod),
+      status = COALESCE(?, status),
+      notes = COALESCE(?, notes)
+     WHERE id = ?`,
+    [roomId || null, guestName, guestPhone, guestNationality, bedCount, checkInDate, checkOutDate, totalPrice, paymentMethod, status, notes, req.params.id],
+    function(err) {
+      if (err) { res.status(500).json({ error: err.message }); return; }
+      if (roomId && status === 'checked_in') {
+        db.run("UPDATE rooms SET status='occupied' WHERE id=?", [roomId]);
+      } else if (roomId && status === 'checked_out') {
+        db.run("UPDATE rooms SET status='cleaning' WHERE id=?", [roomId]);
+      }
+      io.emit('room_occupancy_updated');
+      io.emit('room_status_updated');
+      res.json({ changes: this.changes });
+    }
+  );
+});
+app.delete('/api/room-occupancy/:id', authenticateToken, (req, res) => {
+  db.get("SELECT roomId, status FROM room_occupancy WHERE id=?", [req.params.id], (err, row) => {
+    db.run("DELETE FROM room_occupancy WHERE id=?", [req.params.id], function(err2) {
+      if (err2) { res.status(500).json({ error: err2.message }); return; }
+      if (row && row.roomId && row.status === 'checked_in') {
+        db.get("SELECT COUNT(*) as cnt FROM room_occupancy WHERE roomId=? AND status='checked_in'", [row.roomId], (err3, countRow) => {
+          if (!err3 && countRow && countRow.cnt === 0) {
+            db.run("UPDATE rooms SET status='vacant' WHERE id=?", [row.roomId]);
+            io.emit('room_status_updated');
+          }
+        });
+      }
+      io.emit('room_occupancy_updated');
+      res.json({ changes: this.changes });
     });
   });
 });
@@ -905,8 +1001,58 @@ app.post('/api/rentals', authenticateToken, (req, res) => {
       if (err) { res.status(500).json({ error: err.message }); return; }
       db.run("UPDATE bikes SET status='rented' WHERE id=?", [bikeId]);
       io.emit('bike_status_updated');
+      io.emit('rental_updated');
+
+      // Automatic Telegram Alert for Motor Rental Start
+      db.get("SELECT name, plateNumber FROM bikes WHERE id = ?", [bikeId], (bErr, bRow) => {
+        const bikeLabel = bRow ? `${bRow.name} (${bRow.plateNumber || 'No Plate'})` : `Bike #${bikeId}`;
+        const rentalAlert = `<b>[MOTOR RENTAL STARTED]</b>\n\n` +
+          `Bike: <b>${escapeHtml(bikeLabel)}</b>\n` +
+          `Guest: <b>${escapeHtml(guestName)}</b>\n` +
+          `Phone: ${escapeHtml(guestPhone || 'N/A')}\n` +
+          `Period: ${startDate} → ${endDate}\n` +
+          `Daily Rate: $${dailyRate} | Deposit: $${deposit || 0} (${escapeHtml(depositType || 'cash')})\n` +
+          `Time: ${new Date().toLocaleString('en-GB', { timeZone: 'Asia/Phnom_Penh' })}`;
+        sendTelegramMessage(rentalAlert).catch(e => console.warn('TG rental alert error:', e));
+      });
+
       res.json({ id: this.lastID });
     });
+});
+app.put('/api/rentals/:id', authenticateToken, (req, res) => {
+  const {
+    bikeId, guestName, guestPhone, guestNationality, deposit, depositType,
+    startDate, endDate, dailyRate, totalPrice, lateFee, damageFee, damageNotes, status
+  } = req.body;
+  db.run(
+    `UPDATE rentals SET
+      bikeId = COALESCE(?, bikeId),
+      guestName = COALESCE(?, guestName),
+      guestPhone = COALESCE(?, guestPhone),
+      guestNationality = COALESCE(?, guestNationality),
+      deposit = COALESCE(?, deposit),
+      depositType = COALESCE(?, depositType),
+      startDate = COALESCE(?, startDate),
+      endDate = COALESCE(?, endDate),
+      dailyRate = COALESCE(?, dailyRate),
+      totalPrice = COALESCE(?, totalPrice),
+      lateFee = COALESCE(?, lateFee),
+      damageFee = COALESCE(?, damageFee),
+      damageNotes = COALESCE(?, damageNotes),
+      status = COALESCE(?, status)
+     WHERE id = ?`,
+    [bikeId, guestName, guestPhone, guestNationality, deposit, depositType, startDate, endDate, dailyRate, totalPrice, lateFee, damageFee, damageNotes, status, req.params.id],
+    function(err) {
+      if (err) { res.status(500).json({ error: err.message }); return; }
+      if (bikeId) {
+        if (status === 'active') db.run("UPDATE bikes SET status='rented' WHERE id=?", [bikeId]);
+        else if (status === 'returned') db.run("UPDATE bikes SET status='available' WHERE id=?", [bikeId]);
+      }
+      io.emit('rental_updated');
+      io.emit('bike_status_updated');
+      res.json({ changes: this.changes });
+    }
+  );
 });
 app.patch('/api/rentals/:id/return', authenticateToken, (req, res) => {
   const { postCondition, damageFee, damageNotes } = req.body;
@@ -918,6 +1064,20 @@ app.patch('/api/rentals/:id/return', authenticateToken, (req, res) => {
         if (err2) { res.status(500).json({ error: err2.message }); return; }
         db.run("UPDATE bikes SET status='available' WHERE id=?", [row.bikeId]);
         io.emit('bike_status_updated');
+        io.emit('rental_updated');
+
+        // Automatic Telegram Alert for Motor Rental Return
+        db.get("SELECT name, plateNumber FROM bikes WHERE id = ?", [row.bikeId], (bErr, bRow) => {
+          const bikeLabel = bRow ? `${bRow.name} (${bRow.plateNumber || 'No Plate'})` : `Bike #${row.bikeId}`;
+          const returnAlert = `<b>[MOTOR RENTAL RETURNED]</b>\n\n` +
+            `Bike: <b>${escapeHtml(bikeLabel)}</b>\n` +
+            `Guest: <b>${escapeHtml(row.guestName)}</b>\n` +
+            `Damage Fee: $${damageFee || 0}\n` +
+            `Status: Returned & Available\n` +
+            `Time: ${new Date().toLocaleString('en-GB', { timeZone: 'Asia/Phnom_Penh' })}`;
+          sendTelegramMessage(returnAlert).catch(e => console.warn('TG return alert error:', e));
+        });
+
         res.json({ success: true });
       });
   });
@@ -927,10 +1087,13 @@ app.delete('/api/rentals/:id', authenticateToken, (req, res) => {
     db.run("DELETE FROM rentals WHERE id=?", [req.params.id], function(err2) {
       if (err2) { res.status(500).json({ error: err2.message }); return; }
       if (row) db.run("UPDATE bikes SET status='available' WHERE id=?", [row.bikeId]);
+      io.emit('bike_status_updated');
+      io.emit('rental_updated');
       res.json({ changes: this.changes });
     });
   });
 });
+
 
 // ===================== INVOICES =====================
 app.get('/api/invoices', authenticateToken, (req, res) => {
@@ -944,14 +1107,26 @@ app.post('/api/invoices', authenticateToken, (req, res) => {
   const invoiceNumber = `INV-${Date.now()}`;
   db.run(`INSERT INTO invoices (invoiceNumber, guestName, guestPhone, roomOccupancyId, rentalId, roomCharge, bikeCharge, lateFee, damageFee, extras, extrasNote, discount, totalAmount, paymentMethod, paymentStatus, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unpaid', ?)`,
     [invoiceNumber, guestName, guestPhone, roomOccupancyId || null, rentalId || null, roomCharge || 0, bikeCharge || 0, lateFee || 0, damageFee || 0, extras || 0, extrasNote || '', discount || 0, total, paymentMethod || 'cash', notes || ''],
-    function(err) { if (err) res.status(500).json({ error: err.message }); else res.json({ id: this.lastID, invoiceNumber, total }); });
+    function(err) {
+      if (err) res.status(500).json({ error: err.message });
+      else {
+        io.emit('invoices_updated');
+        res.json({ id: this.lastID, invoiceNumber, total });
+      }
+    });
 });
 app.patch('/api/invoices/:id/pay', authenticateToken, (req, res) => {
   const { paymentMethod } = req.body;
   const now = new Date().toISOString();
   db.run("UPDATE invoices SET paymentStatus='paid', paymentMethod=?, paidAt=? WHERE id=?",
     [paymentMethod || 'cash', now, req.params.id],
-    function(err) { if (err) res.status(500).json({ error: err.message }); else res.json({ success: true }); });
+    function(err) {
+      if (err) res.status(500).json({ error: err.message });
+      else {
+        io.emit('invoices_updated');
+        res.json({ success: true });
+      }
+    });
 });
 
 // ===================== HOUSEKEEPING =====================
@@ -964,7 +1139,13 @@ app.post('/api/housekeeping', authenticateToken, (req, res) => {
   const { roomId, taskType, assignedTo, notes, scheduledDate } = req.body;
   db.run(`INSERT INTO housekeeping_tasks (roomId, taskType, assignedTo, notes, scheduledDate, status) VALUES (?, ?, ?, ?, ?, 'pending')`,
     [roomId, taskType || 'clean', assignedTo || '', notes || '', scheduledDate || new Date().toISOString().split('T')[0]],
-    function(err) { if (err) res.status(500).json({ error: err.message }); else res.json({ id: this.lastID }); });
+    function(err) {
+      if (err) res.status(500).json({ error: err.message });
+      else {
+        io.emit('housekeeping_updated');
+        res.json({ id: this.lastID });
+      }
+    });
 });
 app.patch('/api/housekeeping/:id/complete', authenticateToken, (req, res) => {
   const now = new Date().toISOString();
@@ -973,6 +1154,7 @@ app.patch('/api/housekeeping/:id/complete', authenticateToken, (req, res) => {
       if (err2) { res.status(500).json({ error: err2.message }); return; }
       // Mark room as vacant after cleaning
       if (row) { db.run("UPDATE rooms SET status='vacant' WHERE id=? AND status='cleaning'", [row.roomId]); io.emit('room_status_updated'); }
+      io.emit('housekeeping_updated');
       res.json({ success: true });
     });
   });
@@ -988,7 +1170,13 @@ app.post('/api/maintenance', authenticateToken, (req, res) => {
   const { bikeId, logType, description, cost, performedBy, nextServiceDate } = req.body;
   db.run(`INSERT INTO maintenance_logs (bikeId, logType, description, cost, performedBy, nextServiceDate) VALUES (?, ?, ?, ?, ?, ?)`,
     [bikeId, logType, description, cost || 0, performedBy || '', nextServiceDate || null],
-    function(err) { if (err) res.status(500).json({ error: err.message }); else res.json({ id: this.lastID }); });
+    function(err) {
+      if (err) res.status(500).json({ error: err.message });
+      else {
+        io.emit('maintenance_updated');
+        res.json({ id: this.lastID });
+      }
+    });
 });
 
 // ===================== GUESTS CRM =====================
@@ -1001,11 +1189,21 @@ app.post('/api/guests', authenticateToken, (req, res) => {
   const { name, phone, email, nationality, passportId, notes } = req.body;
   db.run(`INSERT INTO guests (name, phone, email, nationality, passportId, notes) VALUES (?, ?, ?, ?, ?, ?)`,
     [name, phone || '', email || '', nationality || '', passportId || '', notes || ''],
-    function(err) { if (err) res.status(500).json({ error: err.message }); else res.json({ id: this.lastID }); });
+    function(err) {
+      if (err) res.status(500).json({ error: err.message });
+      else {
+        io.emit('guests_updated');
+        res.json({ id: this.lastID });
+      }
+    });
 });
 app.delete('/api/guests/:id', authenticateToken, (req, res) => {
   db.run("DELETE FROM guests WHERE id=?", [req.params.id], function(err) {
-    if (err) res.status(500).json({ error: err.message }); else res.json({ changes: this.changes });
+    if (err) res.status(500).json({ error: err.message });
+    else {
+      io.emit('guests_updated');
+      res.json({ changes: this.changes });
+    }
   });
 });
 
@@ -1117,16 +1315,26 @@ app.put('/api/bookings/:id', authenticateToken, (req, res) => {
 });
 app.patch('/api/bookings/:id/status', authenticateToken, (req, res) => {
   const { status } = req.body;
-  db.run("UPDATE bookings SET status=? WHERE id=?", [status, req.params.id], function(err) {
-    if (err) res.status(500).json({ error: err.message });
-    else {
-      io.emit('booking_updated');
-      res.json({ changes: this.changes });
+  const idParam = req.params.id;
+  // Match by numeric id first, then fall back to bookingRef (for Firestore-sourced bookings)
+  db.run(
+    "UPDATE bookings SET status=? WHERE id=? OR bookingRef=?",
+    [status, idParam, idParam],
+    function(err) {
+      if (err) { res.status(500).json({ error: err.message }); return; }
+      if (this.changes === 0) {
+        // Try matching by the id portion of a composite key (e.g. last segment after '-')
+        res.json({ changes: 0, warning: 'No rows matched' });
+      } else {
+        io.emit('booking_updated');
+        res.json({ changes: this.changes });
+      }
     }
-  });
+  );
 });
 app.delete('/api/bookings/:id', authenticateToken, (req, res) => {
-  db.run("DELETE FROM bookings WHERE id = ?", req.params.id, function(err) {
+  const idParam = req.params.id;
+  db.run("DELETE FROM bookings WHERE id = ? OR bookingRef = ?", [idParam, idParam], function(err) {
     if (err) res.status(500).json({ error: err.message });
     else {
       io.emit('booking_updated');
@@ -1261,13 +1469,18 @@ app.post('/api/maintenance', authenticateToken, (req, res) => {
     function(err) {
       if (err) res.status(500).json({ error: err.message });
       else {
+        io.emit('maintenance_updated');
         res.json({ id: this.lastID });
       }
     });
 });
 app.delete('/api/maintenance/:id', authenticateToken, (req, res) => {
   db.run("DELETE FROM maintenance_logs WHERE id = ?", req.params.id, function(err) {
-    if (err) res.status(500).json({ error: err.message }); else res.json({ changes: this.changes });
+    if (err) res.status(500).json({ error: err.message });
+    else {
+      io.emit('maintenance_updated');
+      res.json({ changes: this.changes });
+    }
   });
 });
 
@@ -1283,32 +1496,72 @@ app.post('/api/expenses', authenticateToken, (req, res) => {
     [title || 'Expense', category || 'Other', Number(amount) || 0, date || new Date().toISOString().split('T')[0], notes || ''],
     function(err) {
       if (err) res.status(500).json({ error: err.message });
-      else res.json({ id: this.lastID });
+      else {
+        io.emit('expenses_updated');
+        res.json({ id: this.lastID });
+      }
     });
 });
 app.delete('/api/expenses/:id', authenticateToken, (req, res) => {
   db.run("DELETE FROM expenses WHERE id = ?", req.params.id, function(err) {
-    if (err) res.status(500).json({ error: err.message }); else res.json({ changes: this.changes });
+    if (err) res.status(500).json({ error: err.message });
+    else {
+      io.emit('expenses_updated');
+      res.json({ changes: this.changes });
+    }
   });
 });
 
 // ===================== TELEGRAM ALERT CENTER =====================
 app.post('/api/telegram/send-alert', authenticateToken, async (req, res) => {
-  const { type, subject, message } = req.body;
+  const { type, category, subject, title, message, summary, details, stats } = req.body;
   try {
+    const timeStr = new Date().toLocaleString('en-GB', { timeZone: 'Asia/Phnom_Penh' });
     let text = '';
-    if (type === 'custom') {
-      text = `📢 <b>${escapeHtml(subject || 'Alert')}</b>\n\n${escapeHtml(message || '')}\n\n👤 Sent by: ${escapeHtml(req.user?.username || 'Admin')}`;
+
+    if (category) {
+      const headerTitle = title || subject || `${category} Status Report`;
+      let statsSection = '';
+      if (stats && typeof stats === 'object') {
+        statsSection = Object.entries(stats)
+          .map(([k, v]) => `• <b>${escapeHtml(k)}:</b> ${escapeHtml(v)}`)
+          .join('\n');
+      }
+
+      text = `<b>[${escapeHtml(category).toUpperCase()} ALERT]</b>\n` +
+             `📌 <b>${escapeHtml(headerTitle)}</b>\n\n` +
+             `${summary ? escapeHtml(summary) + '\n\n' : ''}` +
+             `${statsSection ? statsSection + '\n\n' : ''}` +
+             `${details ? escapeHtml(details) + '\n\n' : ''}` +
+             `🕒 <i>${timeStr}</i>\n` +
+             `👤 <i>Sent by: ${escapeHtml(req.user?.username || 'Admin')}</i>`;
+    } else if (type === 'custom') {
+      text = `<b>[ANNOUNCEMENT]</b>\n\n` +
+             `📌 <b>${escapeHtml(subject || 'Notice')}</b>\n\n` +
+             `${escapeHtml(message || '')}\n\n` +
+             `🕒 <i>${timeStr}</i>\n` +
+             `👤 <i>Sent by: ${escapeHtml(req.user?.username || 'Admin')}</i>`;
     } else if (type === 'dashboard') {
-      text = `📊 <b>Siem Reap Angkor — Daily Dashboard Summary</b>\n\n🕒 ${new Date().toLocaleString('en-GB')}\n\nCheck the Admin Panel for live operations.`;
-    } else if (type === 'motos') {
-      text = `🛵 <b>Fleet Status Check</b>\n\nAll motorbikes inspected and updated in system.\n🕒 ${new Date().toLocaleString('en-GB')}`;
+      text = `<b>[DASHBOARD SUMMARY]</b>\n\n` +
+             `${escapeHtml(message || summary || 'Daily operational check.')}\n\n` +
+             `🕒 <i>${timeStr}</i>`;
+    } else if (type === 'motos' || type === 'fleet') {
+      text = `<b>[FLEET STATUS]</b>\n\n` +
+             `${escapeHtml(message || summary || 'All motorbikes inspected and updated.')}\n\n` +
+             `🕒 <i>${timeStr}</i>`;
     } else if (type === 'overdue') {
-      text = `⚠️ <b>ATTENTION: Overdue Rentals Alert</b>\n\nPlease check active rentals list for any late returns!`;
+      text = `<b>[OVERDUE RENTALS WARNING]</b>\n\n` +
+             `${escapeHtml(message || summary || 'Please inspect active rentals list for late returns.')}\n\n` +
+             `🕒 <i>${timeStr}</i>`;
     } else if (type === 'income') {
-      text = `💰 <b>Income Summary Alert</b>\n\nLatest transactions recorded in system.\n🕒 ${new Date().toLocaleString('en-GB')}`;
+      text = `<b>[INCOME REPORT]</b>\n\n` +
+             `${escapeHtml(message || summary || 'Financial transactions recorded in system.')}\n\n` +
+             `🕒 <i>${timeStr}</i>`;
     } else {
-      text = `🔔 <b>Alert from Admin Panel</b>\n\n${escapeHtml(message || 'System Notification')}`;
+      text = `<b>[SYSTEM NOTIFICATION]</b>\n\n` +
+             `📌 <b>${escapeHtml(subject || title || 'Alert')}</b>\n\n` +
+             `${escapeHtml(message || summary || 'Notification from Admin Panel')}\n\n` +
+             `🕒 <i>${timeStr}</i>`;
     }
 
     const result = await sendTelegramMessage(text);
@@ -1377,7 +1630,7 @@ app.get('/api/settings', authenticateToken, (req, res) => {
   });
 });
 app.get('/api/public-settings', (req, res) => {
-  db.all("SELECT key, value FROM settings WHERE key IN ('hero_images','about_us','why_us','services_bar','testimonials','contact_info','business_profile','pricing_tax','payment_methods','invoice_settings','public_texts')", [], (err, rows) => {
+  db.all("SELECT key, value FROM settings WHERE key IN ('hero_images','about_us','why_us','services_bar','testimonials','contact_info','business_profile','pricing_tax','payment_methods','invoice_settings','public_texts','shop_settings','theme_settings')", [], (err, rows) => {
     if (err) res.status(500).json({ error: err.message });
     else { const s = {}; rows.forEach(r => s[r.key] = r.value); res.json(s); }
   });

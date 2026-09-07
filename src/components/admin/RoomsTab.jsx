@@ -84,9 +84,51 @@ export default function RoomsTab({
   btnDanger,
   statusBadge,
   today,
-  currency
+  currency,
+  sendCategoryTelegramAlert,
+  tgSending
 }) {
   const { showModal, showConfirm } = useModal();
+  const [localTgSending, setLocalTgSending] = useState(false);
+
+  const handleRoomsTelegramAlert = async () => {
+    setLocalTgSending(true);
+    try {
+      const vacantCount = rooms.filter(r => r.status === 'vacant').length;
+      const occupiedCount = rooms.filter(r => r.status === 'occupied').length;
+      const cleaningCount = rooms.filter(r => r.status === 'cleaning').length;
+      const activeOcc = (occupancy || []).filter(o => o.status === 'checked_in').length;
+
+      if (sendCategoryTelegramAlert) {
+        await sendCategoryTelegramAlert({
+          category: 'Rooms',
+          title: 'Room Inventory & Occupancy Status Report',
+          summary: `Total Rooms: ${rooms.length} (${bedCategories.length} Categories)\nVacant: ${vacantCount} | Occupied: ${occupiedCount} | Cleaning: ${cleaningCount}`,
+          details: `Active in-house guests: ${activeOcc}`
+        });
+      } else {
+        const res = await fetch('/api/telegram/send-alert', {
+          method: 'POST',
+          headers: auth?.headers || { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            category: 'Rooms',
+            title: 'Room Inventory & Occupancy Status Report',
+            summary: `Total Rooms: ${rooms.length} (${bedCategories.length} Categories)\nVacant: ${vacantCount} | Occupied: ${occupiedCount} | Cleaning: ${cleaningCount}`,
+            details: `Active in-house guests: ${activeOcc}`
+          })
+        });
+        if (res.ok) {
+          showModal('success', 'Telegram Alert Sent', 'Room occupancy and inventory status sent to Telegram.');
+        } else {
+          showModal('error', 'Alert Error', 'Failed to send Telegram alert.');
+        }
+      }
+    } catch (err) {
+      showModal('error', 'Network Error', err.message);
+    } finally {
+      setLocalTgSending(false);
+    }
+  };
 
   // Sub-navigation: 'occupancy' | 'categories' | 'rooms'
   const [subSection, setSubSection] = useState('rooms');
@@ -96,9 +138,17 @@ export default function RoomsTab({
   const [catFilter, setCatFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [floorFilter, setFloorFilter] = useState('all');
+  const [roomSortBy, setRoomSortBy] = useState('name-asc');
 
   // Room Detail Modal / "One by One" view state
   const [selectedRoomId, setSelectedRoomId] = useState(null);
+
+  // Inline editing in room detail modal
+  const [isEditingDetail, setIsEditingDetail] = useState(false);
+  const [detailEditForm, setDetailEditForm] = useState({
+    name: '', floor: '1', categoryId: '', price: 25, status: 'vacant',
+    description: '', amenities: [], images: [], bedType: '', bedCount: 1, capacity: 2
+  });
 
   // Check-in form state
   const [checkInForm, setCheckInForm] = useState({
@@ -165,7 +215,7 @@ export default function RoomsTab({
 
   // ─── Filtered Rooms ────────────────────────────────────────────────────────
   const filteredRooms = useMemo(() => {
-    return (rooms || []).filter(room => {
+    const list = (rooms || []).filter(room => {
       const q = roomSearch.toLowerCase().trim();
       const matchName = !q || String(room.name || '').toLowerCase().includes(q) || String(room.categoryName || '').toLowerCase().includes(q);
       const matchCat = catFilter === 'all' || String(room.categoryId) === String(catFilter);
@@ -173,7 +223,31 @@ export default function RoomsTab({
       const matchFloor = floorFilter === 'all' || String(room.floor) === String(floorFilter);
       return matchName && matchCat && matchStatus && matchFloor;
     });
-  }, [rooms, roomSearch, catFilter, statusFilter, floorFilter]);
+
+    list.sort((a, b) => {
+      if (roomSortBy === 'name-asc') {
+        return String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true });
+      }
+      if (roomSortBy === 'name-desc') {
+        return String(b.name || '').localeCompare(String(a.name || ''), undefined, { numeric: true });
+      }
+      if (roomSortBy === 'price-asc') {
+        return (Number(a.price || 0)) - (Number(b.price || 0));
+      }
+      if (roomSortBy === 'price-desc') {
+        return (Number(b.price || 0)) - (Number(a.price || 0));
+      }
+      if (roomSortBy === 'floor-asc') {
+        return (Number(a.floor || 1)) - (Number(b.floor || 1));
+      }
+      if (roomSortBy === 'status') {
+        return String(a.status || '').localeCompare(String(b.status || ''));
+      }
+      return 0;
+    });
+
+    return list;
+  }, [rooms, roomSearch, catFilter, statusFilter, floorFilter, roomSortBy]);
 
   // Selected Room for "One by One" Detail View
   const selectedRoom = useMemo(() => {
@@ -191,12 +265,14 @@ export default function RoomsTab({
     if (filteredRooms.length === 0) return;
     const prevIdx = selectedRoomIndex > 0 ? selectedRoomIndex - 1 : filteredRooms.length - 1;
     setSelectedRoomId(filteredRooms[prevIdx].id);
+    setIsEditingDetail(false);
   };
 
   const handleNextRoom = () => {
     if (filteredRooms.length === 0) return;
     const nextIdx = selectedRoomIndex < filteredRooms.length - 1 ? selectedRoomIndex + 1 : 0;
     setSelectedRoomId(filteredRooms[nextIdx].id);
+    setIsEditingDetail(false);
   };
 
   // ─── CHECK-IN HANDLERS ────────────────────────────────────────────────────
@@ -296,6 +372,7 @@ export default function RoomsTab({
   };
 
   const handleEditCategory = (cat) => {
+    setSubSection('categories');
     setEditingCategory(cat);
     setCategoryForm({
       name: cat.name || '',
@@ -399,6 +476,7 @@ export default function RoomsTab({
   };
 
   const handleEditRoom = (room) => {
+    setSubSection('rooms');
     setEditingRoom(room);
     setRoomForm({
       name: room.name || '',
@@ -453,6 +531,61 @@ export default function RoomsTab({
     });
     setSelectedRoomId(null);
     setSubSection('occupancy');
+  };
+
+  // ─── INLINE DETAIL EDIT HELPERS ────────────────────────────────────────────
+  const startEditingDetail = (room) => {
+    setDetailEditForm({
+      name: room.name || '',
+      floor: String(room.floor || '1'),
+      categoryId: String(room.categoryId || ''),
+      price: Number(room.price || room.rate || 25),
+      status: room.status || 'vacant',
+      description: room.description || '',
+      amenities: Array.isArray(room.amenities) ? [...room.amenities] : [],
+      images: Array.isArray(room.images) ? [...room.images] : [],
+      bedType: room.bedType || '',
+      bedCount: Number(room.bedCount || 1),
+      capacity: Number(room.capacity || 2)
+    });
+    setIsEditingDetail(true);
+  };
+
+  const cancelEditingDetail = () => {
+    setIsEditingDetail(false);
+  };
+
+  const handleDetailImageUpload = async (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const dataUrl = await fileToBase64(file, 1400, 1400, 0.82);
+      setDetailEditForm(prev => ({ ...prev, images: [...(prev.images || []), dataUrl] }));
+    }
+  };
+
+  const saveDetailEdit = async () => {
+    try {
+      const selectedCat = bedCategories.find(c => String(c.id) === String(detailEditForm.categoryId));
+      const payload = {
+        ...detailEditForm,
+        name: detailEditForm.name.trim(),
+        price: Number(detailEditForm.price || selectedCat?.price || 25),
+        bedType: detailEditForm.bedType || selectedCat?.bedType || `${selectedCat?.bedCount || 1} Bed`,
+        bedCount: Number(detailEditForm.bedCount || selectedCat?.bedCount || 1),
+        categoryName: selectedCat?.name || 'Standard Room',
+        capacity: Number(detailEditForm.capacity || selectedCat?.capacity || 2),
+        amenities: detailEditForm.amenities?.length > 0 ? detailEditForm.amenities : (selectedCat?.amenities || []),
+        images: detailEditForm.images?.length > 0 ? detailEditForm.images : (selectedCat?.images || [])
+      };
+
+      await RoomService.update(selectedRoomId, payload);
+      setIsEditingDetail(false);
+      if (fetchAll) fetchAll();
+      if (fetchDash) fetchDash();
+      showModal('success', 'Room Updated', `Room ${payload.name} has been updated successfully.`);
+    } catch (err) {
+      showModal('error', 'Update Error', err.message);
+    }
   };
 
   return (
@@ -534,6 +667,36 @@ export default function RoomsTab({
             {rooms.filter(r => r.status === 'cleaning').length} Cleaning
           </span>
         </div>
+
+        {/* Print & Alert to Telegram Actions */}
+        <div className="flex items-center gap-1.5 ml-auto">
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="px-3 py-2 bg-white hover:bg-stone-100 border border-stone-200 text-stone-700 text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
+            title="បោះពុម្ពបញ្ជីបន្ទប់ (Print Rooms)"
+          >
+            <i className="fa-solid fa-print text-stone-600"></i>
+            <span>Print</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleRoomsTelegramAlert}
+            disabled={tgSending || localTgSending}
+            className="px-3 py-2 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-2xs disabled:opacity-50 cursor-pointer"
+            title="ផ្ញើស្ថានភាពបន្ទប់ទៅ Telegram"
+          >
+            <i className="fa-brands fa-telegram text-sky-500"></i>
+            <span>Alert Telegram</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Printable Report Header */}
+      <div className="print-only mb-4 p-4 border-b border-stone-300">
+        <h2 className="text-xl font-bold">Motorental Siemreab Angkor & Guesthouse</h2>
+        <p className="text-sm text-stone-700 font-semibold">Rooms Inventory & Accommodation Status Report</p>
+        <p className="text-xs text-stone-500">Total Rooms: {rooms.length} | Bed Categories: {bedCategories.length} | Printed: {new Date().toLocaleString()}</p>
       </div>
 
       {/* ───────────────────────────────────────────────────────────────────── */}
@@ -557,6 +720,8 @@ export default function RoomsTab({
           statusBadge={statusBadge}
           today={today}
           currency={currency}
+          sendCategoryTelegramAlert={sendCategoryTelegramAlert}
+          tgSending={tgSending}
         />
       )}
 
@@ -1103,7 +1268,21 @@ export default function RoomsTab({
                     <p className="text-xs text-stone-500">Click any room card to open the room detail view one by one</p>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      value={roomSortBy}
+                      onChange={e => setRoomSortBy(e.target.value)}
+                      className="bg-stone-50 border border-stone-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-stone-700 outline-none focus:border-brand-500 cursor-pointer shadow-2xs"
+                      title="តម្រៀបបន្ទប់ (Sort rooms)"
+                    >
+                      <option value="name-asc">លេខបន្ទប់: A ដល់ Z (1-9)</option>
+                      <option value="name-desc">លេខបន្ទប់: Z ដល់ A (9-1)</option>
+                      <option value="price-asc">តម្លៃ: ទាបទៅខ្ពស់</option>
+                      <option value="price-desc">តម្លៃ: ខ្ពស់ទៅទាប</option>
+                      <option value="floor-asc">ជាន់: ទាបទៅខ្ពស់</option>
+                      <option value="status">តាមស្ថានភាពបន្ទប់</option>
+                    </select>
+
                     <input
                       type="text"
                       placeholder="Search room number..."
@@ -1576,318 +1755,957 @@ export default function RoomsTab({
 
             {/* Modal Body */}
             <div className="p-6 overflow-y-auto space-y-6 flex-1">
-              {/* Header: Room Name, Category, Price, Status */}
-              <div className="flex flex-wrap items-start justify-between gap-4 pb-5 border-b border-stone-100">
-                <div>
-                  <div className="flex items-center gap-3">
-                    <h2 className="text-3xl font-black text-stone-900 font-display">
-                      Room {selectedRoom.name}
-                    </h2>
-                    <span className={`px-3 py-1 rounded-full text-xs font-bold capitalize border ${statusBadgeColors[selectedRoom.status] || 'bg-stone-100 text-stone-700'}`}>
-                      <i className={`fa-solid ${statusIcons[selectedRoom.status] || 'fa-circle'} mr-1.5 text-xs`}></i>
-                      {selectedRoom.status}
-                    </span>
+
+              {/* ──── EDITABLE MODE ──── */}
+              {isEditingDetail ? (
+                <div className="space-y-5">
+                  {/* Header with Save/Cancel */}
+                  <div className="flex items-center justify-between pb-4 border-b border-indigo-100">
+                    <h3 className="font-black text-lg text-stone-900 flex items-center gap-2">
+                      <i className="fa-solid fa-pen-to-square text-indigo-500"></i>
+                      Editing Room Details (កែប្រែព័ត៌មានបន្ទប់)
+                    </h3>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={cancelEditingDetail}
+                        className="px-3 py-1.5 text-xs font-bold text-stone-600 bg-stone-100 hover:bg-stone-200 rounded-xl border border-stone-200 transition-colors"
+                      >
+                        <i className="fa-solid fa-times mr-1"></i> Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={saveDetailEdit}
+                        className="px-4 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-sm transition-colors"
+                      >
+                        <i className="fa-solid fa-check mr-1"></i> Save Changes
+                      </button>
+                    </div>
                   </div>
-                  <p className="text-sm font-bold text-indigo-600 mt-1 flex items-center gap-2">
-                    <i className="fa-solid fa-layer-group"></i>
-                    <span>Category: {selectedRoom.categoryName || `${selectedRoom.bedCount || 1} Bed Category`}</span>
-                    <span className="text-stone-300">•</span>
-                    <span className="text-stone-500 font-medium">Floor {selectedRoom.floor || '1'}</span>
-                  </p>
-                </div>
 
-                <div className="text-right">
-                  <div className="text-3xl font-black text-brand-500">
-                    ${selectedRoom.price || selectedRoom.rate || 25}
-                    <span className="text-xs text-stone-400 font-normal"> / night</span>
+                  {/* Room Name & Floor */}
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="col-span-2">
+                      <label className={labelCls}>Room Name / Number (ឈ្មោះបន្ទប់)</label>
+                      <input
+                        type="text"
+                        value={detailEditForm.name}
+                        onChange={e => setDetailEditForm({ ...detailEditForm, name: e.target.value })}
+                        placeholder="e.g. 101, 102 or Deluxe 201"
+                        className={inputCls}
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Floor (ជាន់)</label>
+                      <input
+                        type="text"
+                        value={detailEditForm.floor}
+                        onChange={e => setDetailEditForm({ ...detailEditForm, floor: e.target.value })}
+                        placeholder="1"
+                        className={inputCls}
+                      />
+                    </div>
                   </div>
-                  <p className="text-xs text-stone-500 font-medium mt-0.5">
-                    {selectedRoom.bedType || `${selectedRoom.bedCount || 1} Bed`}
-                  </p>
-                </div>
-              </div>
 
-              {/* Status Quick-Switch Bar */}
-              <div className="p-3.5 bg-stone-50 rounded-2xl border border-stone-200 flex flex-wrap items-center justify-between gap-3">
-                <span className="text-xs font-bold text-stone-600 uppercase tracking-wider">
-                  <i className="fa-solid fa-arrows-rotate mr-1.5 text-stone-400"></i>
-                  Change Room Status:
-                </span>
-                <div className="flex flex-wrap gap-2">
-                  {['vacant', 'occupied', 'cleaning', 'maintenance'].map(st => (
-                    <button
-                      key={st}
-                      type="button"
-                      onClick={() => handleStatusChange(selectedRoom.id, st)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold capitalize transition-all border ${
-                        selectedRoom.status === st
-                          ? 'bg-stone-900 text-white border-stone-900 shadow-sm'
-                          : 'bg-white text-stone-700 border-stone-200 hover:bg-stone-100'
-                      }`}
-                    >
-                      {st}
-                    </button>
-                  ))}
-                </div>
-              </div>
+                  {/* Category & Status */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className={labelCls}>Category Bed (ប្រភេទគ្រែ)</label>
+                      <select
+                        value={detailEditForm.categoryId}
+                        onChange={e => {
+                          const selCat = bedCategories.find(c => String(c.id) === String(e.target.value));
+                          setDetailEditForm({
+                            ...detailEditForm,
+                            categoryId: e.target.value,
+                            price: selCat?.price || detailEditForm.price,
+                            amenities: selCat?.amenities || detailEditForm.amenities,
+                            bedType: selCat?.bedType || detailEditForm.bedType,
+                            bedCount: selCat?.bedCount || detailEditForm.bedCount,
+                            capacity: selCat?.capacity || detailEditForm.capacity
+                          });
+                        }}
+                        className={inputCls}
+                      >
+                        <option value="">Select Bed Category...</option>
+                        {bedCategories.map(cat => (
+                          <option key={cat.id} value={cat.id}>
+                            {cat.name} ({cat.bedCount} Bed{cat.bedCount > 1 ? 's' : ''} — ${cat.price}/night)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className={labelCls}>Room Status (ស្ថានភាព)</label>
+                      <select
+                        value={detailEditForm.status}
+                        onChange={e => setDetailEditForm({ ...detailEditForm, status: e.target.value })}
+                        className={inputCls}
+                      >
+                        <option value="vacant">Vacant (ទំនេរ)</option>
+                        <option value="occupied">Occupied (មានភ្ញៀវ)</option>
+                        <option value="cleaning">Cleaning (កំពុងសម្អាត)</option>
+                        <option value="maintenance">Maintenance (ជួសជុល)</option>
+                      </select>
+                    </div>
+                  </div>
 
-              {/* Active Occupancy Card */}
-              {(() => {
-                const activeStay = activeOccupancy.find(o => String(o.roomId) === String(selectedRoom.id));
-                if (activeStay) {
-                  return (
-                    <div className="p-5 bg-blue-50 rounded-2xl border border-blue-200 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <h4 className="font-bold text-blue-900 text-sm flex items-center gap-2">
-                          <i className="fa-solid fa-user-check text-blue-600"></i>
-                          Current Occupant Details
-                        </h4>
-                        <button
-                          type="button"
-                          onClick={() => handleCheckOut(activeStay.id, activeStay.guestName)}
-                          className="px-3 py-1.5 bg-amber-500 text-white text-xs font-bold rounded-xl hover:bg-amber-600 shadow-sm transition-colors"
-                        >
-                          <i className="fa-solid fa-right-from-bracket mr-1"></i> Check Out
-                        </button>
-                      </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                        <div>
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-blue-500 block">Guest Name</span>
-                          <span className="font-black text-stone-900 text-sm">{activeStay.guestName}</span>
-                        </div>
-                        <div>
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-blue-500 block">Phone</span>
-                          <span className="font-mono text-stone-800">{activeStay.guestPhone || '—'}</span>
-                        </div>
-                        <div>
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-blue-500 block">Check-in</span>
-                          <span className="font-bold text-stone-800">{activeStay.checkInDate}</span>
-                        </div>
-                        <div>
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-blue-500 block">Check-out</span>
-                          <span className="font-bold text-amber-700">{activeStay.checkOutDate}</span>
-                        </div>
-                      </div>
-                      {activeStay.notes && (
-                        <p className="text-xs text-blue-800 bg-white/70 p-2.5 rounded-xl border border-blue-100">
-                          <span className="font-bold">Notes:</span> {activeStay.notes}
-                        </p>
-                      )}
+                  {/* Price, Bed Type, Bed Count, Capacity */}
+                  <div className="grid grid-cols-4 gap-3">
+                    <div>
+                      <label className={labelCls}>Price / Night ($)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        step="0.5"
+                        value={detailEditForm.price}
+                        onChange={e => setDetailEditForm({ ...detailEditForm, price: parseFloat(e.target.value) || 0 })}
+                        className={inputCls}
+                      />
                     </div>
-                  );
-                } else if (selectedRoom.status === 'vacant') {
-                  return (
-                    <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-200 flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center font-bold">
-                          <i className="fa-solid fa-check"></i>
-                        </div>
-                        <div>
-                          <h4 className="font-bold text-emerald-900 text-sm">Room is Vacant and Ready</h4>
-                          <p className="text-xs text-emerald-700">Cleaned and inspected for arriving guests</p>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleQuickCheckInToRoom(selectedRoom)}
-                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-colors whitespace-nowrap"
-                      >
-                        <i className="fa-solid fa-user-plus mr-1.5"></i>
-                        Check In Guest to Room {selectedRoom.name}
-                      </button>
+                    <div>
+                      <label className={labelCls}>Bed Type (ប្រភេទគ្រែ)</label>
+                      <input
+                        type="text"
+                        value={detailEditForm.bedType}
+                        onChange={e => setDetailEditForm({ ...detailEditForm, bedType: e.target.value })}
+                        placeholder="e.g. 1 Queen Bed"
+                        className={inputCls}
+                      />
                     </div>
-                  );
-                } else if (selectedRoom.status === 'cleaning') {
-                  return (
-                    <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 flex items-center justify-between gap-3">
-                      <div>
-                        <h4 className="font-bold text-amber-900 text-sm">Room Needs Housekeeping</h4>
-                        <p className="text-xs text-amber-700">Awaiting cleaning and linens replacement</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleStatusChange(selectedRoom.id, 'vacant')}
-                        className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-colors"
-                      >
-                        <i className="fa-solid fa-check mr-1.5"></i>
-                        Mark as Cleaned & Vacant
-                      </button>
+                    <div>
+                      <label className={labelCls}>Beds (ចំនួនគ្រែ)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="10"
+                        value={detailEditForm.bedCount}
+                        onChange={e => setDetailEditForm({ ...detailEditForm, bedCount: parseInt(e.target.value) || 1 })}
+                        className={inputCls}
+                      />
                     </div>
-                  );
-                } else {
-                  return (
-                    <div className="p-4 bg-red-50 rounded-2xl border border-red-200 flex items-center justify-between gap-3">
-                      <div>
-                        <h4 className="font-bold text-red-900 text-sm">Room Under Maintenance</h4>
-                        <p className="text-xs text-red-700">Repairs or inspection in progress</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleStatusChange(selectedRoom.id, 'vacant')}
-                        className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-colors"
-                      >
-                        <i className="fa-solid fa-check mr-1.5"></i>
-                        Mark Ready & Vacant
-                      </button>
+                    <div>
+                      <label className={labelCls}>Max Guests</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="10"
+                        value={detailEditForm.capacity}
+                        onChange={e => setDetailEditForm({ ...detailEditForm, capacity: parseInt(e.target.value) || 2 })}
+                        className={inputCls}
+                      />
                     </div>
-                  );
-                }
-              })()}
+                  </div>
 
-              {/* Photos Gallery */}
-              <div>
-                <h4 className="font-bold text-stone-900 text-sm mb-2 flex items-center gap-2">
-                  <i className="fa-solid fa-images text-brand-500"></i>
-                  <span>Room Photos</span>
-                </h4>
-                {(() => {
-                  const photos = Array.isArray(selectedRoom.images) && selectedRoom.images.length > 0
-                    ? selectedRoom.images
-                    : (selectedRoom.imageUrl ? [selectedRoom.imageUrl] : ['https://images.unsplash.com/photo-1590490360182-c33d57733427?w=800&q=80']);
-                  return (
-                    <div className="grid grid-cols-3 gap-2">
-                      {photos.map((img, i) => (
-                        <div key={i} className="h-32 rounded-xl overflow-hidden border border-stone-200 bg-stone-100">
-                          <img src={img} alt={`Room Photo ${i + 1}`} className="w-full h-full object-cover hover:scale-105 transition-transform duration-300" />
+                  {/* Description */}
+                  <div>
+                    <label className={labelCls}>Room Description / Notes (ការពិពណ៌នា)</label>
+                    <textarea
+                      rows="3"
+                      value={detailEditForm.description}
+                      onChange={e => setDetailEditForm({ ...detailEditForm, description: e.target.value })}
+                      placeholder="Corner room, extra quiet, garden view window..."
+                      className={inputCls}
+                    ></textarea>
+                  </div>
+
+                  {/* Amenities Checkboxes */}
+                  <div>
+                    <label className={labelCls}>Amenities (សេវាកម្មក្នុងបន្ទប់)</label>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-40 overflow-y-auto p-3 bg-stone-50 rounded-xl border border-stone-200 text-xs">
+                      {ALL_AMENITIES.map(amenity => {
+                        const checked = (detailEditForm.amenities || []).includes(amenity);
+                        return (
+                          <label key={amenity} className="flex items-center gap-2 cursor-pointer p-1 rounded hover:bg-white transition-colors">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={e => {
+                                const cur = detailEditForm.amenities || [];
+                                const updated = e.target.checked ? [...cur, amenity] : cur.filter(a => a !== amenity);
+                                setDetailEditForm({ ...detailEditForm, amenities: updated });
+                              }}
+                              className="w-4 h-4 accent-brand-600 rounded"
+                            />
+                            <i className={`fa-solid ${AMENITY_ICONS[amenity] || 'fa-check'} text-[10px] text-brand-500`}></i>
+                            <span className="truncate">{amenity}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Photo Upload & Gallery */}
+                  <div>
+                    <label className={labelCls}>Room Photos (រូបភាពបន្ទប់)</label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleDetailImageUpload}
+                      className="w-full text-xs text-stone-500 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-brand-50 file:text-brand-600 hover:file:bg-brand-100 cursor-pointer"
+                    />
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {(detailEditForm.images || []).map((img, i) => (
+                        <div key={i} className="relative group w-20 h-20 rounded-xl overflow-hidden border border-stone-200">
+                          <img src={img} alt={`Room Photo ${i + 1}`} className="w-full h-full object-cover" />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const arr = [...detailEditForm.images];
+                              arr.splice(i, 1);
+                              setDetailEditForm({ ...detailEditForm, images: arr });
+                            }}
+                            className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs transition-opacity"
+                          >
+                            <i className="fa-solid fa-trash"></i>
+                          </button>
                         </div>
                       ))}
                     </div>
-                  );
-                })()}
-              </div>
+                  </div>
 
-              {/* Specifications & Amenities */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200 space-y-2 text-xs">
-                  <h4 className="font-bold text-stone-900 text-xs uppercase tracking-wider mb-2">
-                    <i className="fa-solid fa-sliders mr-1.5 text-indigo-500"></i>
-                    Bed & Capacity Details
-                  </h4>
-                  <div className="flex justify-between py-1 border-b border-stone-200/60">
-                    <span className="text-stone-500">Bed Category:</span>
-                    <span className="font-bold text-stone-900">{selectedRoom.categoryName || 'Standard'}</span>
-                  </div>
-                  <div className="flex justify-between py-1 border-b border-stone-200/60">
-                    <span className="text-stone-500">Bed Configuration:</span>
-                    <span className="font-bold text-stone-900">{selectedRoom.bedType || `${selectedRoom.bedCount || 1} Bed`}</span>
-                  </div>
-                  <div className="flex justify-between py-1 border-b border-stone-200/60">
-                    <span className="text-stone-500">Number of Beds:</span>
-                    <span className="font-bold text-stone-900">{selectedRoom.bedCount || 1} Bed{selectedRoom.bedCount > 1 ? 's' : ''}</span>
-                  </div>
-                  <div className="flex justify-between py-1 border-b border-stone-200/60">
-                    <span className="text-stone-500">Max Capacity:</span>
-                    <span className="font-bold text-stone-900">{selectedRoom.capacity || 2} Persons</span>
-                  </div>
-                  <div className="flex justify-between py-1">
-                    <span className="text-stone-500">Floor Level:</span>
-                    <span className="font-bold text-stone-900">Floor {selectedRoom.floor || '1'}</span>
+                  {/* Bottom Save/Cancel bar */}
+                  <div className="pt-4 border-t border-stone-200 flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={cancelEditingDetail}
+                      className="px-4 py-2 text-xs font-bold text-stone-600 bg-stone-100 hover:bg-stone-200 rounded-xl border border-stone-200 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={saveDetailEdit}
+                      className="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-sm transition-colors"
+                    >
+                      <i className="fa-solid fa-check mr-1.5"></i> Save All Changes
+                    </button>
                   </div>
                 </div>
-
-                <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200 space-y-2 text-xs">
-                  <h4 className="font-bold text-stone-900 text-xs uppercase tracking-wider mb-2">
-                    <i className="fa-solid fa-list-check mr-1.5 text-brand-500"></i>
-                    Included Amenities
-                  </h4>
-                  <div className="grid grid-cols-2 gap-1.5 max-h-36 overflow-y-auto">
-                    {(selectedRoom.amenities || ALL_AMENITIES.slice(0, 6)).map(a => (
-                      <div key={a} className="flex items-center gap-1.5 text-stone-700">
-                        <i className={`fa-solid ${AMENITY_ICONS[a] || 'fa-check'} text-[10px] text-brand-500`}></i>
-                        <span className="truncate">{a}</span>
+              ) : (
+                /* ──── READ-ONLY MODE (original detail view) ──── */
+                <div className="space-y-6">
+                  {/* Header: Room Name, Category, Price, Status */}
+                  <div className="flex flex-wrap items-start justify-between gap-4 pb-5 border-b border-stone-100">
+                    <div>
+                      <div className="flex items-center gap-3">
+                        <h2 className="text-3xl font-black text-stone-900 font-display">
+                          Room {selectedRoom.name}
+                        </h2>
+                        <span className={`px-3 py-1 rounded-full text-xs font-bold capitalize border ${statusBadgeColors[selectedRoom.status] || 'bg-stone-100 text-stone-700'}`}>
+                          <i className={`fa-solid ${statusIcons[selectedRoom.status] || 'fa-circle'} mr-1.5 text-xs`}></i>
+                          {selectedRoom.status}
+                        </span>
                       </div>
-                    ))}
+                      <p className="text-sm font-bold text-indigo-600 mt-1 flex items-center gap-2">
+                        <i className="fa-solid fa-layer-group"></i>
+                        <span>Category: {selectedRoom.categoryName || `${selectedRoom.bedCount || 1} Bed Category`}</span>
+                        <span className="text-stone-300">•</span>
+                        <span className="text-stone-500 font-medium">Floor {selectedRoom.floor || '1'}</span>
+                      </p>
+                    </div>
+
+                    <div className="text-right">
+                      <div className="text-3xl font-black text-brand-500">
+                        ${selectedRoom.price || selectedRoom.rate || 25}
+                        <span className="text-xs text-stone-400 font-normal"> / night</span>
+                      </div>
+                      <p className="text-xs text-stone-500 font-medium mt-0.5">
+                        {selectedRoom.bedType || `${selectedRoom.bedCount || 1} Bed`}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Status Quick-Switch Bar */}
+                  <div className="p-3.5 bg-stone-50 rounded-2xl border border-stone-200 flex flex-wrap items-center justify-between gap-3">
+                    <span className="text-xs font-bold text-stone-600 uppercase tracking-wider">
+                      <i className="fa-solid fa-arrows-rotate mr-1.5 text-stone-400"></i>
+                      Change Room Status:
+                    </span>
+                    <div className="flex flex-wrap gap-2">
+                      {['vacant', 'occupied', 'cleaning', 'maintenance'].map(st => (
+                        <button
+                          key={st}
+                          type="button"
+                          onClick={() => handleStatusChange(selectedRoom.id, st)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold capitalize transition-all border ${
+                            selectedRoom.status === st
+                              ? 'bg-stone-900 text-white border-stone-900 shadow-sm'
+                              : 'bg-white text-stone-700 border-stone-200 hover:bg-stone-100'
+                          }`}
+                        >
+                          {st}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Active Occupancy Card */}
+                  {(() => {
+                    const activeStay = activeOccupancy.find(o => String(o.roomId) === String(selectedRoom.id));
+                    if (activeStay) {
+                      return (
+                        <div className="p-5 bg-blue-50 rounded-2xl border border-blue-200 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <h4 className="font-bold text-blue-900 text-sm flex items-center gap-2">
+                              <i className="fa-solid fa-user-check text-blue-600"></i>
+                              Current Occupant Details
+                            </h4>
+                            <button
+                              type="button"
+                              onClick={() => handleCheckOut(activeStay.id, activeStay.guestName)}
+                              className="px-3 py-1.5 bg-amber-500 text-white text-xs font-bold rounded-xl hover:bg-amber-600 shadow-sm transition-colors"
+                            >
+                              <i className="fa-solid fa-right-from-bracket mr-1"></i> Check Out
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                            <div>
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-500 block">Guest Name</span>
+                              <span className="font-black text-stone-900 text-sm">{activeStay.guestName}</span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-500 block">Phone</span>
+                              <span className="font-mono text-stone-800">{activeStay.guestPhone || '—'}</span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-500 block">Check-in</span>
+                              <span className="font-bold text-stone-800">{activeStay.checkInDate}</span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-500 block">Check-out</span>
+                              <span className="font-bold text-amber-700">{activeStay.checkOutDate}</span>
+                            </div>
+                          </div>
+                          {activeStay.notes && (
+                            <p className="text-xs text-blue-800 bg-white/70 p-2.5 rounded-xl border border-blue-100">
+                              <span className="font-bold">Notes:</span> {activeStay.notes}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    } else if (selectedRoom.status === 'vacant') {
+                      return (
+                        <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-200 flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center font-bold">
+                              <i className="fa-solid fa-check"></i>
+                            </div>
+                            <div>
+                              <h4 className="font-bold text-emerald-900 text-sm">Room is Vacant and Ready</h4>
+                              <p className="text-xs text-emerald-700">Cleaned and inspected for arriving guests</p>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleQuickCheckInToRoom(selectedRoom)}
+                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-colors whitespace-nowrap"
+                          >
+                            <i className="fa-solid fa-user-plus mr-1.5"></i>
+                            Check In Guest to Room {selectedRoom.name}
+                          </button>
+                        </div>
+                      );
+                    } else if (selectedRoom.status === 'cleaning') {
+                      return (
+                        <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 flex items-center justify-between gap-3">
+                          <div>
+                            <h4 className="font-bold text-amber-900 text-sm">Room Needs Housekeeping</h4>
+                            <p className="text-xs text-amber-700">Awaiting cleaning and linens replacement</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleStatusChange(selectedRoom.id, 'vacant')}
+                            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-colors"
+                          >
+                            <i className="fa-solid fa-check mr-1.5"></i>
+                            Mark as Cleaned & Vacant
+                          </button>
+                        </div>
+                      );
+                    } else {
+                      return (
+                        <div className="p-4 bg-red-50 rounded-2xl border border-red-200 flex items-center justify-between gap-3">
+                          <div>
+                            <h4 className="font-bold text-red-900 text-sm">Room Under Maintenance</h4>
+                            <p className="text-xs text-red-700">Repairs or inspection in progress</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleStatusChange(selectedRoom.id, 'vacant')}
+                            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-colors"
+                          >
+                            <i className="fa-solid fa-check mr-1.5"></i>
+                            Mark Ready & Vacant
+                          </button>
+                        </div>
+                      );
+                    }
+                  })()}
+
+                  {/* Photos Gallery */}
+                  <div>
+                    <h4 className="font-bold text-stone-900 text-sm mb-2 flex items-center gap-2">
+                      <i className="fa-solid fa-images text-brand-500"></i>
+                      <span>Room Photos</span>
+                    </h4>
+                    {(() => {
+                      const photos = Array.isArray(selectedRoom.images) && selectedRoom.images.length > 0
+                        ? selectedRoom.images
+                        : (selectedRoom.imageUrl ? [selectedRoom.imageUrl] : ['https://images.unsplash.com/photo-1590490360182-c33d57733427?w=800&q=80']);
+                      return (
+                        <div className="grid grid-cols-3 gap-2">
+                          {photos.map((img, i) => (
+                            <div key={i} className="h-32 rounded-xl overflow-hidden border border-stone-200 bg-stone-100">
+                              <img src={img} alt={`Room Photo ${i + 1}`} className="w-full h-full object-cover hover:scale-105 transition-transform duration-300" />
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Specifications & Amenities */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200 space-y-2 text-xs">
+                      <h4 className="font-bold text-stone-900 text-xs uppercase tracking-wider mb-2">
+                        <i className="fa-solid fa-sliders mr-1.5 text-indigo-500"></i>
+                        Bed & Capacity Details
+                      </h4>
+                      <div className="flex justify-between py-1 border-b border-stone-200/60">
+                        <span className="text-stone-500">Bed Category:</span>
+                        <span className="font-bold text-stone-900">{selectedRoom.categoryName || 'Standard'}</span>
+                      </div>
+                      <div className="flex justify-between py-1 border-b border-stone-200/60">
+                        <span className="text-stone-500">Bed Configuration:</span>
+                        <span className="font-bold text-stone-900">{selectedRoom.bedType || `${selectedRoom.bedCount || 1} Bed`}</span>
+                      </div>
+                      <div className="flex justify-between py-1 border-b border-stone-200/60">
+                        <span className="text-stone-500">Number of Beds:</span>
+                        <span className="font-bold text-stone-900">{selectedRoom.bedCount || 1} Bed{selectedRoom.bedCount > 1 ? 's' : ''}</span>
+                      </div>
+                      <div className="flex justify-between py-1 border-b border-stone-200/60">
+                        <span className="text-stone-500">Max Capacity:</span>
+                        <span className="font-bold text-stone-900">{selectedRoom.capacity || 2} Persons</span>
+                      </div>
+                      <div className="flex justify-between py-1">
+                        <span className="text-stone-500">Floor Level:</span>
+                        <span className="font-bold text-stone-900">Floor {selectedRoom.floor || '1'}</span>
+                      </div>
+                    </div>
+
+                    <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200 space-y-2 text-xs">
+                      <h4 className="font-bold text-stone-900 text-xs uppercase tracking-wider mb-2">
+                        <i className="fa-solid fa-list-check mr-1.5 text-brand-500"></i>
+                        Included Amenities
+                      </h4>
+                      <div className="grid grid-cols-2 gap-1.5 max-h-36 overflow-y-auto">
+                        {(selectedRoom.amenities || ALL_AMENITIES.slice(0, 6)).map(a => (
+                          <div key={a} className="flex items-center gap-1.5 text-stone-700">
+                            <i className={`fa-solid ${AMENITY_ICONS[a] || 'fa-check'} text-[10px] text-brand-500`}></i>
+                            <span className="truncate">{a}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Description / Notes */}
+                  {selectedRoom.description && (
+                    <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200">
+                      <h4 className="font-bold text-stone-900 text-xs uppercase tracking-wider mb-2">
+                        <i className="fa-solid fa-file-lines mr-1.5 text-stone-400"></i>
+                        Room Notes
+                      </h4>
+                      <p className="text-sm text-stone-700">{selectedRoom.description}</p>
+                    </div>
+                  )}
+
+                  {/* Room Stay History */}
+                  <div>
+                    <h4 className="font-bold text-stone-900 text-sm mb-2 flex items-center gap-2">
+                      <i className="fa-solid fa-clock-rotate-left text-stone-400"></i>
+                      <span>Recent Stays in Room {selectedRoom.name}</span>
+                    </h4>
+                    {(() => {
+                      const roomHistory = (occupancy || []).filter(o => String(o.roomId) === String(selectedRoom.id)).slice(0, 5);
+                      if (roomHistory.length === 0) {
+                        return <p className="text-xs text-stone-400 italic">No previous stay logs recorded for this room.</p>;
+                      }
+                      return (
+                        <div className="overflow-x-auto rounded-xl border border-stone-200">
+                          <table className="w-full text-xs text-left">
+                            <thead className="bg-stone-100 text-stone-500 uppercase tracking-wider">
+                              <tr>
+                                <th className="px-3 py-2 font-bold">Guest</th>
+                                <th className="px-3 py-2 font-bold">Phone</th>
+                                <th className="px-3 py-2 font-bold">Check-in</th>
+                                <th className="px-3 py-2 font-bold">Check-out</th>
+                                <th className="px-3 py-2 font-bold">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {roomHistory.map(h => (
+                                <tr key={h.id} className="border-b border-stone-100">
+                                  <td className="px-3 py-2 font-bold text-stone-900">{h.guestName}</td>
+                                  <td className="px-3 py-2 font-mono text-stone-600">{h.guestPhone || '—'}</td>
+                                  <td className="px-3 py-2">{h.checkInDate}</td>
+                                  <td className="px-3 py-2">{h.checkOutDate}</td>
+                                  <td className="px-3 py-2 capitalize font-bold text-stone-700">{h.status}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
-              </div>
-
-              {/* Room Stay History */}
-              <div>
-                <h4 className="font-bold text-stone-900 text-sm mb-2 flex items-center gap-2">
-                  <i className="fa-solid fa-clock-rotate-left text-stone-400"></i>
-                  <span>Recent Stays in Room {selectedRoom.name}</span>
-                </h4>
-                {(() => {
-                  const roomHistory = (occupancy || []).filter(o => String(o.roomId) === String(selectedRoom.id)).slice(0, 5);
-                  if (roomHistory.length === 0) {
-                    return <p className="text-xs text-stone-400 italic">No previous stay logs recorded for this room.</p>;
-                  }
-                  return (
-                    <div className="overflow-x-auto rounded-xl border border-stone-200">
-                      <table className="w-full text-xs text-left">
-                        <thead className="bg-stone-100 text-stone-500 uppercase tracking-wider">
-                          <tr>
-                            <th className="px-3 py-2 font-bold">Guest</th>
-                            <th className="px-3 py-2 font-bold">Phone</th>
-                            <th className="px-3 py-2 font-bold">Check-in</th>
-                            <th className="px-3 py-2 font-bold">Check-out</th>
-                            <th className="px-3 py-2 font-bold">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {roomHistory.map(h => (
-                            <tr key={h.id} className="border-b border-stone-100">
-                              <td className="px-3 py-2 font-bold text-stone-900">{h.guestName}</td>
-                              <td className="px-3 py-2 font-mono text-stone-600">{h.guestPhone || '—'}</td>
-                              <td className="px-3 py-2">{h.checkInDate}</td>
-                              <td className="px-3 py-2">{h.checkOutDate}</td>
-                              <td className="px-3 py-2 capitalize font-bold text-stone-700">{h.status}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  );
-                })()}
-              </div>
+              )}
             </div>
 
             {/* Modal Footer */}
             <div className="p-4 bg-stone-50 border-t border-stone-200 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleEditRoom(selectedRoom);
-                    setSelectedRoomId(null);
-                  }}
-                  className="px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold hover:bg-blue-100 transition-colors"
-                >
-                  <i className="fa-solid fa-pen mr-1"></i> Edit Room
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDeleteRoom(selectedRoom.id, selectedRoom.name)}
-                  className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-xl text-xs font-bold hover:bg-red-100 transition-colors"
-                >
-                  <i className="fa-solid fa-trash mr-1"></i> Delete Room
-                </button>
+                {!isEditingDetail ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => startEditingDetail(selectedRoom)}
+                      className="px-3.5 py-1.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold hover:bg-indigo-100 transition-colors"
+                    >
+                      <i className="fa-solid fa-pen-to-square mr-1"></i> Edit All (កែប្រែទាំងអស់)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteRoom(selectedRoom.id, selectedRoom.name)}
+                      className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-xl text-xs font-bold hover:bg-red-100 transition-colors"
+                    >
+                      <i className="fa-solid fa-trash mr-1"></i> Delete Room
+                    </button>
+                  </>
+                ) : (
+                  <span className="text-xs text-indigo-600 font-bold flex items-center gap-1.5">
+                    <i className="fa-solid fa-pen-to-square"></i> Editing mode — make changes above
+                  </span>
+                )}
               </div>
 
               <div className="flex items-center gap-2">
+                {!isEditingDetail && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handlePrevRoom}
+                      className="px-3 py-1.5 rounded-xl border border-stone-200 text-xs font-bold hover:bg-stone-100 transition-colors"
+                    >
+                      ← Prev
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleNextRoom}
+                      className="px-3 py-1.5 rounded-xl border border-stone-200 text-xs font-bold hover:bg-stone-100 transition-colors"
+                    >
+                      Next →
+                    </button>
+                  </>
+                )}
                 <button
                   type="button"
-                  onClick={handlePrevRoom}
-                  className="px-3 py-1.5 rounded-xl border border-stone-200 text-xs font-bold hover:bg-stone-100 transition-colors"
-                >
-                  ← Prev
-                </button>
-                <button
-                  type="button"
-                  onClick={handleNextRoom}
-                  className="px-3 py-1.5 rounded-xl border border-stone-200 text-xs font-bold hover:bg-stone-100 transition-colors"
-                >
-                  Next →
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedRoomId(null)}
+                  onClick={() => { setSelectedRoomId(null); setIsEditingDetail(false); }}
                   className="px-4 py-1.5 bg-stone-900 text-white rounded-xl text-xs font-bold hover:bg-stone-800 transition-colors"
                 >
                   Close
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ───────────────────────────────────────────────────────────────────── */}
+      {/* EDIT ROOM MODAL                                                      */}
+      {/* ───────────────────────────────────────────────────────────────────── */}
+      {editingRoom && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-xl w-full shadow-2xl border border-stone-200 modal-pop my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6 pb-3 border-b border-stone-100">
+              <div>
+                <h3 className="font-bold text-lg text-stone-900 flex items-center gap-2">
+                  <i className="fa-solid fa-hotel text-brand-500"></i>
+                  <span>Edit Room: <strong className="text-brand-600">Room {editingRoom.name}</strong></span>
+                </h3>
+                <p className="text-xs text-stone-500 mt-0.5">Update room details, rate, bed category, and status</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingRoom(null);
+                  setRoomForm({
+                    name: '',
+                    floor: '1',
+                    categoryId: bedCategories[0]?.id || '',
+                    price: bedCategories[0]?.price || 25,
+                    status: 'vacant',
+                    description: '',
+                    amenities: [],
+                    images: []
+                  });
+                }}
+                className="w-8 h-8 flex items-center justify-center text-stone-400 hover:text-stone-700 rounded-full hover:bg-stone-100"
+              >
+                <i className="fa-solid fa-times text-sm"></i>
+              </button>
+            </div>
+
+            <form onSubmit={handleRoomSubmit} className="space-y-4 text-sm">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2">
+                  <label className={labelCls}>Room Name / Number</label>
+                  <input
+                    type="text"
+                    value={roomForm.name}
+                    onChange={e => setRoomForm({ ...roomForm, name: e.target.value })}
+                    placeholder="e.g. 101, 102 or Deluxe 201"
+                    className={inputCls}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className={labelCls}>Floor</label>
+                  <input
+                    type="text"
+                    value={roomForm.floor}
+                    onChange={e => setRoomForm({ ...roomForm, floor: e.target.value })}
+                    placeholder="1"
+                    className={inputCls}
+                  />
+                </div>
+              </div>
+
+              {/* Bed Category Selector */}
+              <div>
+                <label className={labelCls}>Category Bed (ប្រភេទគ្រែ)</label>
+                <select
+                  value={roomForm.categoryId}
+                  onChange={e => {
+                    const selCat = bedCategories.find(c => String(c.id) === String(e.target.value));
+                    setRoomForm({
+                      ...roomForm,
+                      categoryId: e.target.value,
+                      price: selCat?.price || roomForm.price,
+                      amenities: selCat?.amenities || roomForm.amenities
+                    });
+                  }}
+                  className={inputCls}
+                  required
+                >
+                  <option value="">Select Bed Category...</option>
+                  {bedCategories.map(cat => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.name} ({cat.bedCount} Bed{cat.bedCount > 1 ? 's' : ''} — ${cat.price}/night)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Nightly Rate ($)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="0.5"
+                    value={roomForm.price}
+                    onChange={e => setRoomForm({ ...roomForm, price: parseFloat(e.target.value) || 0 })}
+                    className={inputCls}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className={labelCls}>Room Status</label>
+                  <select
+                    value={roomForm.status}
+                    onChange={e => setRoomForm({ ...roomForm, status: e.target.value })}
+                    className={inputCls}
+                  >
+                    <option value="vacant">Vacant (ទំនេរ)</option>
+                    <option value="occupied">Occupied (មានភ្ញៀវ)</option>
+                    <option value="cleaning">Cleaning (កំពុងសម្អាត)</option>
+                    <option value="maintenance">Maintenance (ជួសជុល)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className={labelCls}>Specific Room Notes (Optional)</label>
+                <textarea
+                  rows="2"
+                  value={roomForm.description}
+                  onChange={e => setRoomForm({ ...roomForm, description: e.target.value })}
+                  placeholder="Corner room, extra quiet, garden view window..."
+                  className={inputCls}
+                ></textarea>
+              </div>
+
+              {/* Custom photos */}
+              <div>
+                <label className={labelCls}>Upload Room Photos</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleRoomImageUpload}
+                  className="w-full text-xs text-stone-500 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-brand-50 file:text-brand-600 hover:file:bg-brand-100 cursor-pointer"
+                />
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {(roomForm.images || []).map((img, i) => (
+                    <div key={i} className="relative group w-14 h-14 rounded-lg overflow-hidden border border-stone-200">
+                      <img src={img} alt="Room Photo" className="w-full h-full object-cover" />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const arr = [...roomForm.images];
+                          arr.splice(i, 1);
+                          setRoomForm({ ...roomForm, images: arr });
+                        }}
+                        className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs transition-opacity"
+                      >
+                        <i className="fa-solid fa-trash"></i>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-stone-100 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingRoom(null);
+                    setRoomForm({
+                      name: '',
+                      floor: '1',
+                      categoryId: bedCategories[0]?.id || '',
+                      price: bedCategories[0]?.price || 25,
+                      status: 'vacant',
+                      description: '',
+                      amenities: [],
+                      images: []
+                    });
+                  }}
+                  className={`${btnSecondary} flex-1 justify-center`}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className={`${btnPrimary} flex-1 justify-center`}>
+                  <i className="fa-solid fa-check mr-1.5"></i> Update Room
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ───────────────────────────────────────────────────────────────────── */}
+      {/* EDIT BED CATEGORY MODAL                                              */}
+      {/* ───────────────────────────────────────────────────────────────────── */}
+      {editingCategory && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-xl w-full shadow-2xl border border-stone-200 modal-pop my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6 pb-3 border-b border-stone-100">
+              <div>
+                <h3 className="font-bold text-lg text-stone-900 flex items-center gap-2">
+                  <i className="fa-solid fa-bed text-indigo-500"></i>
+                  <span>Edit Category: <strong className="text-indigo-600">{editingCategory.name}</strong></span>
+                </h3>
+                <p className="text-xs text-stone-500 mt-0.5">Define bed type, capacity & standard nightly rate</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingCategory(null);
+                  setCategoryForm({
+                    name: '',
+                    bedType: '1 Queen Bed',
+                    bedCount: 1,
+                    price: 25,
+                    capacity: 2,
+                    description: '',
+                    amenities: ['Air Conditioning', 'Free Wi-Fi', 'Private Bathroom', 'Hot Shower'],
+                    images: []
+                  });
+                }}
+                className="w-8 h-8 flex items-center justify-center text-stone-400 hover:text-stone-700 rounded-full hover:bg-stone-100"
+              >
+                <i className="fa-solid fa-times text-sm"></i>
+              </button>
+            </div>
+
+            <form onSubmit={handleCategorySubmit} className="space-y-4 text-sm">
+              <div>
+                <label className={labelCls}>Category Name</label>
+                <input
+                  type="text"
+                  value={categoryForm.name}
+                  onChange={e => setCategoryForm({ ...categoryForm, name: e.target.value })}
+                  placeholder="e.g. 1 Bed - Standard Double or Family Suite"
+                  className={inputCls}
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Bed Count</label>
+                  <select
+                    value={categoryForm.bedCount}
+                    onChange={e => {
+                      const count = parseInt(e.target.value);
+                      setCategoryForm({
+                        ...categoryForm,
+                        bedCount: count,
+                        bedType: count === 1 ? '1 Queen Bed' : (count === 2 ? '2 Single Beds' : `${count} Beds`),
+                        capacity: count * 2 > 6 ? 6 : count * 2
+                      });
+                    }}
+                    className={inputCls}
+                  >
+                    <option value={1}>1 Bed (គ្រែ ១)</option>
+                    <option value={2}>2 Beds (គ្រែ ២)</option>
+                    <option value={3}>3 Beds (គ្រែ ៣)</option>
+                    <option value={4}>4 Beds (គ្រែ ៤)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>Nightly Price ($)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="0.5"
+                    value={categoryForm.price}
+                    onChange={e => setCategoryForm({ ...categoryForm, price: parseFloat(e.target.value) || 0 })}
+                    className={inputCls}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Bed Specification</label>
+                  <input
+                    type="text"
+                    value={categoryForm.bedType}
+                    onChange={e => setCategoryForm({ ...categoryForm, bedType: e.target.value })}
+                    placeholder="e.g. 1 King Bed or 2 Single Beds"
+                    className={inputCls}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className={labelCls}>Max Capacity (Guests)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="10"
+                    value={categoryForm.capacity}
+                    onChange={e => setCategoryForm({ ...categoryForm, capacity: parseInt(e.target.value) || 2 })}
+                    className={inputCls}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className={labelCls}>Description</label>
+                <textarea
+                  rows="3"
+                  value={categoryForm.description}
+                  onChange={e => setCategoryForm({ ...categoryForm, description: e.target.value })}
+                  placeholder="Comfortable room with private bath, garden view, quiet atmosphere..."
+                  className={inputCls}
+                ></textarea>
+              </div>
+
+              {/* Amenities */}
+              <div>
+                <label className={labelCls}>Standard Amenities</label>
+                <div className="grid grid-cols-2 gap-1.5 max-h-36 overflow-y-auto p-2.5 bg-stone-50 rounded-xl border border-stone-200 text-xs">
+                  {ALL_AMENITIES.map(amenity => {
+                    const checked = (categoryForm.amenities || []).includes(amenity);
+                    return (
+                      <label key={amenity} className="flex items-center gap-2 cursor-pointer p-1 rounded hover:bg-white transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={e => {
+                            const cur = categoryForm.amenities || [];
+                            const updated = e.target.checked ? [...cur, amenity] : cur.filter(a => a !== amenity);
+                            setCategoryForm({ ...categoryForm, amenities: updated });
+                          }}
+                          className="w-4 h-4 accent-indigo-600 rounded"
+                        />
+                        <span className="truncate">{amenity}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Photos */}
+              <div>
+                <label className={labelCls}>Category Photos</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleCategoryImageUpload}
+                  className="w-full text-xs text-stone-500 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-indigo-50 file:text-indigo-600 hover:file:bg-indigo-100 cursor-pointer"
+                />
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {(categoryForm.images || []).map((img, i) => (
+                    <div key={i} className="relative group w-14 h-14 rounded-lg overflow-hidden border border-stone-200">
+                      <img src={img} alt="Category Photo" className="w-full h-full object-cover" />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const arr = [...categoryForm.images];
+                          arr.splice(i, 1);
+                          setCategoryForm({ ...categoryForm, images: arr });
+                        }}
+                        className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs transition-opacity"
+                      >
+                        <i className="fa-solid fa-trash"></i>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-stone-100 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingCategory(null);
+                    setCategoryForm({
+                      name: '',
+                      bedType: '1 Queen Bed',
+                      bedCount: 1,
+                      price: 25,
+                      capacity: 2,
+                      description: '',
+                      amenities: ['Air Conditioning', 'Free Wi-Fi', 'Private Bathroom', 'Hot Shower'],
+                      images: []
+                    });
+                  }}
+                  className={`${btnSecondary} flex-1 justify-center`}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className={`${btnPrimary} flex-1 justify-center bg-indigo-600 hover:bg-indigo-700`}>
+                  <i className="fa-solid fa-check mr-1.5"></i> Update Bed Category
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

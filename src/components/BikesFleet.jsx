@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
+import { createSocket } from '../services/socket';
 import { collection, getDocs } from 'firebase/firestore';
 import { dbMotos as db } from '../firebase';
+import { MotoService, BikeModelService } from '../services/DatabaseService';
 import BookingModal from './BookingModal';
 import { BikeCardSkeleton } from './Skeleton';
 
@@ -137,11 +139,22 @@ export default function BikesFleet({ texts }) {
 
   useEffect(() => {
     fetchBikes();
-    const socketUrl = window.location.hostname === 'localhost' ? 'http://localhost:3000' : '/';
-    const socket = io(socketUrl);
+
+    // 1. Real-time Firestore Subscriptions
+    const unsubMotos = MotoService.subscribe(() => fetchBikes());
+    const unsubModels = BikeModelService.subscribe(() => fetchBikes());
+
+    // 2. Real-time Socket.IO Events
+    const socket = createSocket();
     socket.on('bike_status_updated', fetchBikes);
     socket.on('bikes_updated', fetchBikes);
-    return () => socket.disconnect();
+    socket.on('rental_updated', fetchBikes);
+
+    return () => {
+      unsubMotos();
+      unsubModels();
+      socket.disconnect();
+    };
   }, []);
 
   useEffect(() => {

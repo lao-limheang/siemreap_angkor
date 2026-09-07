@@ -58,7 +58,7 @@ export function getBikeLabel(motoId, motos = [], models = []) {
   let modelName = '';
   if (b.modelId) {
     const m = models.find(x => String(x.id) === String(b.modelId));
-    if (m) modelName = m.name || m.model || '';
+    if (m) modelName = m.fullName || `${m.brand ? m.brand + ' ' : ''}${m.name || m.model || ''}`.trim();
   }
   const plate = (b.plateNumber || b.plateNo || '').trim();
   const name = b.name || modelName || 'Motor';
@@ -211,9 +211,15 @@ export function normalizeBedCategory(c) {
 export function normalizeRoom(r, categories = []) {
   const num = String(r.number || r.name || '01');
   const name = r.name || (num.startsWith('លេខ') ? num : `បន្ទប់ ${num}`);
-  const catId = String(r.categoryId || r.bedCategoryId || '');
-  const cat = categories.find(c => String(c.id) === catId);
-  const bedCount = Number(r.bedCount || cat?.bedCount || r.beds || 1);
+  const rawCatId = String(r.categoryId || r.bedCategoryId || '');
+  let cat = categories.find(c => String(c.id) === rawCatId);
+  const bedCount = Number(r.bedCount || r.beds || cat?.bedCount || 1);
+  if (!cat && categories.length > 0) {
+    cat = categories.find(c => Number(c.bedCount) === bedCount) ||
+          categories.find(c => (r.categoryName && c.name && c.name.toLowerCase().includes(r.categoryName.toLowerCase())) ||
+                              (r.type && c.name && c.name.toLowerCase().includes(String(r.type).toLowerCase())));
+  }
+  const resolvedCatId = cat ? String(cat.id) : rawCatId;
   const bedType = r.bedType || cat?.bedType || (bedCount === 1 ? '1 Queen Bed' : (bedCount === 2 ? '2 Single Beds' : `${bedCount} Beds`));
   const rate = Number(r.price || r.rate || cat?.price || r.beds1Price || 25);
 
@@ -250,7 +256,7 @@ export function normalizeRoom(r, categories = []) {
     id: String(r.id || ''),
     name,
     number: num,
-    categoryId: catId || (cat?.id || ''),
+    categoryId: resolvedCatId,
     categoryName: cat?.name || r.categoryName || r.type || `${bedCount} Bed Room`,
     bedType,
     bedCount,
@@ -271,20 +277,51 @@ export function normalizeRoom(r, categories = []) {
 }
 
 /**
- * Normalizes a moto record from chafe-2026.
+ * Normalizes a bike model record from chafe-2026 (motor_models).
  */
-export function normalizeMoto(m, models = []) {
-  const model = models.find(mod => String(mod.id) === String(m.modelId));
-  const name = m.name || model?.name || 'Motorbike';
-  const price = Number(m.price || model?.dailyPrice || 15);
+export function normalizeModel(m) {
+  if (!m) return null;
+  const brand = (m.brand || m.description || '').trim();
+  const rawName = (m.name || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+  const name = rawName || (brand ? '' : 'Motor Model');
+  const price = Number(m.dailyPrice || m.price || 15);
+  const fullName = brand ? (name ? `${brand} ${name}` : brand) : name;
 
   return {
     ...m,
+    id: String(m.id || ''),
+    brand,
+    description: brand,
     name,
-    modelName: model?.name || name,
+    fullName,
+    dailyPrice: price,
+    price
+  };
+}
+
+/**
+ * Normalizes a moto record from chafe-2026.
+ */
+export function normalizeMoto(m, models = []) {
+  if (!m) return null;
+  const model = models.find(mod => String(mod.id) === String(m.modelId));
+  const modelFullName = model ? (model.fullName || `${model.brand ? model.brand + ' ' : ''}${model.name || ''}`.trim()) : '';
+  const name = m.name || modelFullName || model?.name || 'Motorbike';
+  const price = Number(m.price || model?.dailyPrice || model?.price || 15);
+
+  return {
+    ...m,
+    id: String(m.id || ''),
+    name,
+    modelName: modelFullName || model?.name || name,
     price,
     dailyPrice: price,
     plateNumber: m.plateNumber || '',
-    status: m.status || 'available'
+    color: m.color || 'Standard',
+    status: (m.status || 'available').toLowerCase(),
+    photoUrl: m.photoUrl || m.imageUrl || '',
+    imageUrl: m.imageUrl || m.photoUrl || '',
+    frameNumber: m.frameNumber || m.chassisNumber || '',
+    chassisNumber: m.frameNumber || m.chassisNumber || ''
   };
 }

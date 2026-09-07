@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
-import { ArrowLeft } from 'lucide-react';
+import { createSocket } from '../services/socket';
+import { ArrowLeft, Search, LayoutGrid, List, SlidersHorizontal, Sparkles, CheckCircle2, X } from 'lucide-react';
 import { collection, getDocs } from 'firebase/firestore';
 import { dbRooms, dbMotos } from '../firebase';
 import { RoomService, BedCategoryService } from '../services/DatabaseService';
@@ -179,14 +180,15 @@ function RoomCard({ room, index, onBook }) {
   };
 
   const currentPrice = room.price ? room.price : (prices[selectedBeds] || 25);
+  const isAvailable = !room.status || room.status === 'vacant' || room.status === 'available';
 
   return (
     <>
-      <div className="card listing-card bg-white rounded-2xl border border-stone-200 overflow-hidden shadow-card flex flex-col justify-between hover:shadow-lg transition-all duration-300">
+      <div className="card listing-card bg-white rounded-2xl border border-stone-200 overflow-hidden shadow-card flex flex-col justify-between hover:shadow-xl transition-all duration-300 group">
         <div>
           {/* Image Slider */}
-          <div className="relative h-56 bg-gradient-to-br from-warm-200 to-stone-200 overflow-hidden group">
-            <img src={images[currentImg]} alt={room.name} className="w-full h-full object-cover transition-all duration-300 group-hover:scale-105" />
+          <div className="relative h-56 bg-gradient-to-br from-warm-200 to-stone-200 overflow-hidden">
+            <img src={images[currentImg]} alt={room.name} className="w-full h-full object-cover transition-all duration-500 group-hover:scale-105" />
 
             {/* Navigation Arrows */}
             {images.length > 1 && (
@@ -212,13 +214,26 @@ function RoomCard({ room, index, onBook }) {
             )}
 
             {/* Category tag */}
-            <div className="absolute top-3 left-3 bg-stone-900/80 backdrop-blur-sm text-white px-2.5 py-1 rounded-full text-[11px] font-bold shadow-sm flex items-center gap-1.5">
+            <div className="absolute top-3 left-3 bg-stone-900/85 backdrop-blur-sm text-white px-2.5 py-1 rounded-full text-[11px] font-bold shadow-sm flex items-center gap-1.5">
               <i className="fa-solid fa-bed text-indigo-400 text-[10px]"></i>
               <span>{room.categoryName || `${room.bedCount || 1} Bed`}</span>
             </div>
 
-            <div className="absolute top-3 right-3 bg-white/90 backdrop-blur-sm px-2.5 py-1 rounded-full text-xs font-bold text-brand-500 shadow-sm">
+            {/* Price Tag */}
+            <div className="absolute top-3 right-3 bg-white/95 backdrop-blur-sm px-2.5 py-1 rounded-full text-xs font-bold text-brand-500 shadow-sm">
               ${currentPrice}/night
+            </div>
+
+            {/* Status Indicator */}
+            <div className="absolute bottom-3 left-3">
+              <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold backdrop-blur-sm flex items-center gap-1.5 shadow-sm ${
+                isAvailable
+                  ? 'bg-emerald-600/90 text-white'
+                  : (room.status === 'cleaning' ? 'bg-amber-500/90 text-white' : 'bg-rose-600/90 text-white')
+              }`}>
+                <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
+                <span>{isAvailable ? 'Available Now' : (room.status === 'cleaning' ? 'Cleaning' : 'Occupied')}</span>
+              </span>
             </div>
           </div>
 
@@ -228,12 +243,14 @@ function RoomCard({ room, index, onBook }) {
                 <h3 className="font-bold text-stone-900 text-lg font-display">Room {room.name}</h3>
                 <p className="text-xs text-indigo-600 font-bold">{room.bedType || `${room.bedCount || 1} Bed`}</p>
               </div>
-              <span className="text-[11px] text-stone-400 font-bold bg-stone-100 px-2 py-0.5 rounded-md">
+              <span className="text-[11px] text-stone-500 font-bold bg-stone-100 px-2.5 py-0.5 rounded-md border border-stone-200/60">
                 Floor {room.floor || '1'}
               </span>
             </div>
 
-            <p className="text-xs text-stone-500 mb-4 leading-relaxed line-clamp-2">{room.description}</p>
+            <p className="text-xs text-stone-500 mb-4 leading-relaxed line-clamp-2">
+              {room.description || 'Comfortable air-conditioned room with private hot shower, cable TV, and free Wi-Fi near Angkor Wat.'}
+            </p>
 
             {/* Bed selector (if room has multi-bed pricing without fixed category) */}
             {!room.categoryId && (
@@ -255,10 +272,15 @@ function RoomCard({ room, index, onBook }) {
               </div>
             )}
 
-            {/* Price */}
-            <div className="flex items-end gap-1.5 mb-4">
-              <span className="text-3xl font-black text-brand-500">${currentPrice}</span>
-              <span className="text-xs text-stone-400 pb-0.5 font-medium">/night</span>
+            {/* Price & Currency Display */}
+            <div className="flex items-baseline justify-between mb-4">
+              <div className="flex items-baseline gap-1">
+                <span className="text-3xl font-black text-brand-500">${currentPrice}</span>
+                <span className="text-xs text-stone-400 font-medium">/night</span>
+              </div>
+              <span className="text-[11px] text-stone-500 font-semibold bg-stone-50 px-2 py-0.5 rounded-md border border-stone-200/70">
+                ~{(currentPrice * 4100).toLocaleString()} ៛ KHR
+              </span>
             </div>
 
             {/* Amenities */}
@@ -302,11 +324,130 @@ function RoomCard({ room, index, onBook }) {
   );
 }
 
+function RoomListRow({ room, onBook }) {
+  const [detailOpen, setDetailOpen] = useState(false);
+  const images = Array.isArray(room.images) && room.images.length > 0
+    ? room.images
+    : (room.imageUrl ? [room.imageUrl] : ['https://images.unsplash.com/photo-1590490360182-c33d57733427?w=600&q=80']);
+  const amenities = Array.isArray(room.amenities) ? room.amenities : [];
+  const currentPrice = Number(room.price || room.rate || 25);
+  const isAvailable = !room.status || room.status === 'vacant' || room.status === 'available';
+
+  return (
+    <>
+      <div className="bg-white rounded-2xl border border-stone-200/90 p-4 sm:p-5 shadow-sm hover:shadow-md transition-all flex flex-col md:flex-row items-stretch md:items-center justify-between gap-5 group">
+        {/* Photo Thumbnail with badges */}
+        <div className="relative w-full md:w-64 h-48 md:h-36 rounded-xl overflow-hidden shrink-0 bg-stone-100">
+          <img
+            src={images[0]}
+            alt={room.name}
+            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+          />
+          <div className="absolute top-2.5 left-2.5 bg-stone-900/80 backdrop-blur-sm text-white px-2.5 py-0.5 rounded-full text-[10px] font-bold">
+            Floor {room.floor || '1'}
+          </div>
+          <div className="absolute top-2.5 right-2.5 bg-white/90 backdrop-blur-sm text-brand-500 font-bold px-2 py-0.5 rounded-full text-[11px] shadow-sm">
+            ${currentPrice}/nt
+          </div>
+          <div className="absolute bottom-2.5 left-2.5">
+            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold backdrop-blur-sm flex items-center gap-1 shadow-sm ${
+              isAvailable
+                ? 'bg-emerald-600/90 text-white'
+                : (room.status === 'cleaning' ? 'bg-amber-500/90 text-white' : 'bg-rose-600/90 text-white')
+            }`}>
+              <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
+              <span>{isAvailable ? 'Available Now' : (room.status === 'cleaning' ? 'Cleaning' : 'Occupied')}</span>
+            </span>
+          </div>
+        </div>
+
+        {/* Room Info */}
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2 mb-1.5">
+            <span className="px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-xs font-bold border border-indigo-200">
+              <i className="fa-solid fa-bed mr-1 text-[10px]"></i>
+              {room.categoryName || `${room.bedCount || 1} Bed`}
+            </span>
+            <span className="text-xs text-stone-500 font-medium">
+              <i className="fa-solid fa-user-group mr-1 text-[10px] text-stone-400"></i>
+              Max {room.capacity || (room.bedCount * 2) || 2} Guests
+            </span>
+          </div>
+
+          <h3 className="font-bold text-stone-900 text-lg font-display truncate">
+            Room {room.name}
+          </h3>
+          <p className="text-xs text-stone-600 font-medium mt-0.5">
+            {room.bedType || `${room.bedCount || 1} Bed`}
+          </p>
+
+          <p className="text-xs text-stone-500 mt-1 line-clamp-1">
+            {room.description || 'Comfortable air-conditioned room near Angkor Wat with private hot shower and free Wi-Fi.'}
+          </p>
+
+          {/* Amenities chips */}
+          {amenities.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-2.5">
+              {amenities.slice(0, 4).map((a, i) => (
+                <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-stone-100 text-stone-600 text-[11px] font-medium">
+                  <i className={`fa-solid ${AMENITY_ICONS[a] || 'fa-check'} text-brand-500 text-[9px]`}></i>
+                  {a}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Price & Booking Actions */}
+        <div className="flex md:flex-col items-center md:items-end justify-between md:justify-center gap-3 pt-3 md:pt-0 border-t md:border-t-0 border-stone-100 shrink-0">
+          <div className="text-left md:text-right">
+            <div className="flex items-baseline gap-1">
+              <span className="text-2xl sm:text-3xl font-black text-brand-500">${currentPrice}</span>
+              <span className="text-xs text-stone-400 font-semibold">/night</span>
+            </div>
+            <span className="text-[10px] text-stone-400 block font-medium">
+              ~{(currentPrice * 4100).toLocaleString()} ៛ KHR
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setDetailOpen(true)}
+              className="px-3.5 py-2 rounded-xl text-xs font-bold text-stone-600 bg-stone-100 hover:bg-stone-200 transition-colors"
+            >
+              Details
+            </button>
+            <button
+              onClick={() => onBook(room, room.bedCount || 1, currentPrice)}
+              className="btn-primary px-4 py-2 text-xs font-bold shadow-md shadow-brand-500/20"
+            >
+              Book Room
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <GuestRoomDetailModal
+        room={{ ...room, price: currentPrice }}
+        isOpen={detailOpen}
+        onClose={() => setDetailOpen(false)}
+        onBook={() => onBook(room, room.bedCount || 1, currentPrice)}
+      />
+    </>
+  );
+}
+
 export default function GuesthousesPage({ publicSettings, loadingSettings }) {
   const [rooms, setRooms] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [catFilter, setCatFilter] = useState('all');
+  const [viewMode, setViewMode] = useState('grid');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [floorFilter, setFloorFilter] = useState('all');
+  const [availabilityFilter, setAvailabilityFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('default');
+
   const [bookingModalState, setBookingModalState] = useState({
     isOpen: false,
     room: null,
@@ -361,30 +502,101 @@ export default function GuesthousesPage({ publicSettings, loadingSettings }) {
     window.scrollTo(0, 0);
     fetchRoomsAndCategories();
 
-    const socketUrl = window.location.hostname === 'localhost' ? 'http://localhost:3000' : '/';
-    const socket = io(socketUrl);
+    // 1. Firestore Real-time Subscriptions (onSnapshot)
+    const unsubRooms = RoomService.subscribe((firestoreRooms) => {
+      if (firestoreRooms && firestoreRooms.length > 0) {
+        setRooms(prev => firestoreRooms.map(r => normalizeRoom(r, categories)));
+      }
+    });
+
+    const unsubBedCategories = BedCategoryService.subscribe((firestoreCats) => {
+      if (firestoreCats && firestoreCats.length > 0) {
+        const safeCats = firestoreCats.map(normalizeBedCategory);
+        setCategories(safeCats);
+        setRooms(prev => prev.map(r => normalizeRoom(r, safeCats)));
+      }
+    });
+
+    // 2. Socket.IO Real-time Events
+    const socket = createSocket();
     socket.on('room_status_updated', fetchRoomsAndCategories);
     socket.on('rooms_updated', fetchRoomsAndCategories);
+    socket.on('room_occupancy_updated', fetchRoomsAndCategories);
     socket.on('bed_categories_updated', fetchRoomsAndCategories);
-    return () => socket.disconnect();
+
+    return () => {
+      unsubRooms();
+      unsubBedCategories();
+      socket.disconnect();
+    };
   }, []);
 
   const filteredRooms = useMemo(() => {
-    if (catFilter === 'all') return rooms;
-    return rooms.filter(r => {
-      if (String(r.categoryId) === String(catFilter)) return true;
-      if (catFilter === '1bed' && (r.bedCount === 1 || r.beds === 1)) return true;
-      if (catFilter === '2beds' && (r.bedCount === 2 || r.beds === 2)) return true;
-      if (catFilter === '3beds' && (r.bedCount === 3 || r.beds === 3)) return true;
-      return false;
-    });
-  }, [rooms, catFilter]);
+    let result = rooms.slice();
+
+    // 1. Category Filter
+    if (catFilter !== 'all') {
+      result = result.filter(r => {
+        if (String(r.categoryId) === String(catFilter)) return true;
+        if (catFilter === '1bed' && (r.bedCount === 1 || r.beds === 1)) return true;
+        if (catFilter === '2beds' && (r.bedCount === 2 || r.beds === 2)) return true;
+        if (catFilter === '3beds' && (r.bedCount === 3 || r.beds === 3)) return true;
+        return false;
+      });
+    }
+
+    // 2. Floor Filter
+    if (floorFilter !== 'all') {
+      result = result.filter(r => String(r.floor || '1') === String(floorFilter));
+    }
+
+    // 3. Availability Filter
+    if (availabilityFilter === 'available') {
+      result = result.filter(r => !r.status || r.status === 'vacant' || r.status === 'available');
+    }
+
+    // 4. Search Filter
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      result = result.filter(r =>
+        (r.name && String(r.name).toLowerCase().includes(q)) ||
+        (r.number && String(r.number).toLowerCase().includes(q)) ||
+        (r.categoryName && String(r.categoryName).toLowerCase().includes(q)) ||
+        (r.bedType && String(r.bedType).toLowerCase().includes(q)) ||
+        (r.description && String(r.description).toLowerCase().includes(q))
+      );
+    }
+
+    // 5. Sorting
+    if (sortBy === 'price-asc') {
+      result.sort((a, b) => Number(a.price || a.rate || 0) - Number(b.price || b.rate || 0));
+    } else if (sortBy === 'price-desc') {
+      result.sort((a, b) => Number(b.price || b.rate || 0) - Number(a.price || a.rate || 0));
+    } else if (sortBy === 'room-asc') {
+      result.sort((a, b) => String(a.name || a.number).localeCompare(String(b.name || b.number), undefined, { numeric: true }));
+    }
+
+    return result;
+  }, [rooms, catFilter, floorFilter, availabilityFilter, searchQuery, sortBy]);
 
   const navigate = useNavigate();
 
   const handleOpenBooking = (room, bedCount, price) => {
     navigate(`/book-room?roomId=${room.id}${bedCount ? `&beds=${bedCount}` : ''}`);
   };
+
+  const clearFilters = () => {
+    setCatFilter('all');
+    setSearchQuery('');
+    setFloorFilter('all');
+    setAvailabilityFilter('all');
+    setSortBy('default');
+  };
+
+  // Find lowest price across all rooms
+  const lowestPrice = rooms.length > 0
+    ? Math.min(...rooms.map(r => Number(r.price || r.rate || 25)))
+    : 12;
 
   return (
     <div className="font-sans">
@@ -400,99 +612,216 @@ export default function GuesthousesPage({ publicSettings, loadingSettings }) {
                 <div className="h-4 w-full max-w-xl skeleton-bone rounded"></div>
               </div>
             ) : (
-              <div className="mb-10">
+              <div className="mb-8">
                 <Link to="/" className="inline-flex items-center text-sm font-bold text-stone-500 hover:text-brand-500 transition-colors mb-6 group">
                   <ArrowLeft className="w-4 h-4 mr-2 group-hover:-translate-x-1 transition-transform" /> Back to Home
                 </Link>
-                <h1 className="font-display text-4xl sm:text-5xl font-bold text-stone-900 mt-4 mb-4">
-                  {publicSettings?.public_texts?.guesthouses_title || "Our Guesthouses"}
-                </h1>
-                <p className="text-stone-500 max-w-2xl text-lg leading-relaxed">
-                  {publicSettings?.public_texts?.guesthouses_subtitle || "Comfortable, clean rooms near Angkor Wat — perfect for solo travellers, couples, and families. Review our available rooms below."}
-                </p>
-
-                {/* Direct Booking Page Highlight Banner */}
-                <div className="mt-6 p-4 bg-gradient-to-r from-brand-50 via-warm-50 to-emerald-50 rounded-2xl border border-brand-200/80 flex flex-col sm:flex-row items-center justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-brand-500 text-white flex items-center justify-center text-lg shadow-sm shrink-0">
-                      <i className="fa-solid fa-calendar-check"></i>
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-stone-900 text-sm">Full Room Booking Page Available</h4>
-                      <p className="text-xs text-stone-500">View all amenities, live night calculation, transparent rates in USD & KHR, and instant confirmation.</p>
-                    </div>
+                <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+                  <div>
+                    <h1 className="font-display text-4xl sm:text-5xl font-bold text-stone-900 mt-2 mb-3">
+                      {publicSettings?.public_texts?.guesthouses_title || "Our Guesthouses"}
+                    </h1>
+                    <p className="text-stone-500 max-w-2xl text-base sm:text-lg leading-relaxed">
+                      {publicSettings?.public_texts?.guesthouses_subtitle || "Comfortable, clean rooms near Angkor Wat — perfect for solo travellers, couples, and families. Review our available rooms below."}
+                    </p>
                   </div>
+
+                  {/* Direct Room Booking Page Button */}
                   <Link
                     to="/book-room"
-                    className="btn-primary px-5 py-2.5 text-xs font-bold shrink-0 shadow-sm"
+                    className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl bg-brand-500 hover:bg-brand-600 text-white font-bold text-xs shadow-md shadow-brand-500/20 transition-all shrink-0 self-start md:self-auto"
                   >
-                    Open Booking Page <i className="fa-solid fa-arrow-right ml-1"></i>
+                    <i className="fa-solid fa-calendar-check text-sm"></i>
+                    <span>Open Booking Voucher Page</span>
+                    <i className="fa-solid fa-arrow-right text-xs ml-1"></i>
                   </Link>
                 </div>
 
-                {/* Category Filter Tabs */}
-                <div className="flex flex-wrap items-center gap-2 mt-8">
-                  <button
-                    onClick={() => setCatFilter('all')}
-                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                      catFilter === 'all' ? 'bg-brand-500 text-white shadow-md' : 'bg-white text-stone-600 border border-stone-200 hover:bg-stone-100'
-                    }`}
-                  >
-                    All Rooms ({rooms.length})
-                  </button>
-                  {categories.map(cat => {
-                    const count = rooms.filter(r => String(r.categoryId) === String(cat.id)).length;
-                    return (
+                {/* ═══════════════════════════════════════════════════════════════════ */}
+                {/* 1. CATEGORY EASY VIEW CARDS BAR                                     */}
+                {/* ═══════════════════════════════════════════════════════════════════ */}
+                <div className="mt-8">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-xs font-bold uppercase tracking-wider text-stone-400">
+                      Select Room Category
+                    </p>
+                    <span className="text-xs text-stone-500">
+                      Showing <strong className="text-stone-800">{filteredRooms.length}</strong> of {rooms.length} rooms
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    {/* ALL ROOMS CARD */}
+                    <button
+                      onClick={() => setCatFilter('all')}
+                      className={`p-4 rounded-2xl border text-left transition-all relative overflow-hidden group ${
+                        catFilter === 'all'
+                          ? 'bg-gradient-to-br from-brand-500 to-brand-600 text-white border-brand-600 shadow-lg shadow-brand-500/25 ring-2 ring-brand-400'
+                          : 'bg-white text-stone-700 border-stone-200 hover:border-brand-300 hover:shadow-md'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold transition-colors ${
+                          catFilter === 'all' ? 'bg-white/20 text-white' : 'bg-brand-50 text-brand-600 group-hover:bg-brand-100'
+                        }`}>
+                          <i className="fa-solid fa-hotel"></i>
+                        </div>
+                        <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                          catFilter === 'all' ? 'bg-white/25 text-white' : 'bg-stone-100 text-stone-600'
+                        }`}>
+                          {rooms.length} {rooms.length === 1 ? 'Room' : 'Rooms'}
+                        </span>
+                      </div>
+                      <h3 className="font-bold text-sm tracking-tight">All Rooms</h3>
+                      <p className={`text-xs mt-0.5 ${catFilter === 'all' ? 'text-brand-100' : 'text-emerald-600 font-semibold'}`}>
+                        from ${lowestPrice}/night
+                      </p>
+                    </button>
+
+                    {/* CATEGORY CARDS */}
+                    {categories.map((cat, idx) => {
+                      const matchingRooms = rooms.filter(r => String(r.categoryId) === String(cat.id));
+                      const minPrice = matchingRooms.length > 0
+                        ? Math.min(...matchingRooms.map(r => Number(r.price || r.rate || 25)))
+                        : (cat.price || 25);
+                      const isSelected = String(catFilter) === String(cat.id);
+                      const icons = ['fa-bed', 'fa-user-group', 'fa-people-roof', 'fa-crown'];
+                      const icon = icons[idx % icons.length];
+
+                      return (
+                        <button
+                          key={cat.id}
+                          onClick={() => setCatFilter(cat.id)}
+                          className={`p-4 rounded-2xl border text-left transition-all relative overflow-hidden group ${
+                            isSelected
+                              ? 'bg-gradient-to-br from-brand-500 to-brand-600 text-white border-brand-600 shadow-lg shadow-brand-500/25 ring-2 ring-brand-400'
+                              : 'bg-white text-stone-700 border-stone-200 hover:border-brand-300 hover:shadow-md'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold transition-colors ${
+                              isSelected ? 'bg-white/20 text-white' : 'bg-indigo-50 text-indigo-600 group-hover:bg-indigo-100'
+                            }`}>
+                              <i className={`fa-solid ${icon}`}></i>
+                            </div>
+                            <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                              isSelected ? 'bg-white/25 text-white' : 'bg-stone-100 text-stone-600'
+                            }`}>
+                              {matchingRooms.length} {matchingRooms.length === 1 ? 'Room' : 'Rooms'}
+                            </span>
+                          </div>
+                          <h3 className="font-bold text-sm truncate tracking-tight">{cat.name}</h3>
+                          <p className={`text-xs mt-0.5 ${isSelected ? 'text-brand-100' : 'text-emerald-600 font-semibold'}`}>
+                            from ${minPrice}/night
+                          </p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* ═══════════════════════════════════════════════════════════════════ */}
+                {/* 2. EASY VIEW TOOLBAR: SEARCH, FILTERS, VIEW MODE                    */}
+                {/* ═══════════════════════════════════════════════════════════════════ */}
+                <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-stone-200 shadow-sm mt-5 mb-6 flex flex-col md:flex-row items-center justify-between gap-3">
+                  {/* Search Input */}
+                  <div className="relative w-full md:w-80">
+                    <Search className="w-4 h-4 text-stone-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
+                      placeholder="Search room name or number (e.g. 05, 3)..."
+                      className="w-full bg-stone-50 border border-stone-200 rounded-xl pl-10 pr-8 py-2 text-xs text-stone-800 placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all"
+                    />
+                    {searchQuery && (
                       <button
-                        key={cat.id}
-                        onClick={() => setCatFilter(cat.id)}
-                        className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                          String(catFilter) === String(cat.id) ? 'bg-brand-500 text-white shadow-md' : 'bg-white text-stone-600 border border-stone-200 hover:bg-stone-100'
-                        }`}
+                        onClick={() => setSearchQuery('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600"
                       >
-                        {cat.name} ({count})
+                        <X className="w-3.5 h-3.5" />
                       </button>
-                    );
-                  })}
-                  {categories.length === 0 && (
-                    <>
+                    )}
+                  </div>
+
+                  {/* Filters, Sort & View Mode Switcher */}
+                  <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-between md:justify-end">
+                    {/* Floor filter */}
+                    <select
+                      value={floorFilter}
+                      onChange={e => setFloorFilter(e.target.value)}
+                      className="bg-stone-50 border border-stone-200 rounded-xl px-3 py-2 text-xs font-bold text-stone-700 focus:outline-none focus:border-brand-500 cursor-pointer"
+                    >
+                      <option value="all">All Floors</option>
+                      <option value="1">Floor 1</option>
+                      <option value="2">Floor 2</option>
+                      <option value="3">Floor 3</option>
+                    </select>
+
+                    {/* Availability filter */}
+                    <select
+                      value={availabilityFilter}
+                      onChange={e => setAvailabilityFilter(e.target.value)}
+                      className="bg-stone-50 border border-stone-200 rounded-xl px-3 py-2 text-xs font-bold text-stone-700 focus:outline-none focus:border-brand-500 cursor-pointer"
+                    >
+                      <option value="all">All Status</option>
+                      <option value="available">Available Only</option>
+                    </select>
+
+                    {/* Sort */}
+                    <select
+                      value={sortBy}
+                      onChange={e => setSortBy(e.target.value)}
+                      className="bg-stone-50 border border-stone-200 rounded-xl px-3 py-2 text-xs font-bold text-stone-700 focus:outline-none focus:border-brand-500 cursor-pointer"
+                    >
+                      <option value="default">Sort: Recommended</option>
+                      <option value="price-asc">Price: Low to High</option>
+                      <option value="price-desc">Price: High to Low</option>
+                      <option value="room-asc">Room Number</option>
+                    </select>
+
+                    {/* View Mode Toggle */}
+                    <div className="flex items-center bg-stone-100 p-1 rounded-xl border border-stone-200/80">
                       <button
-                        onClick={() => setCatFilter('1bed')}
-                        className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                          catFilter === '1bed' ? 'bg-brand-500 text-white shadow-md' : 'bg-white text-stone-600 border border-stone-200 hover:bg-stone-100'
+                        onClick={() => setViewMode('grid')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${
+                          viewMode === 'grid'
+                            ? 'bg-white text-brand-600 shadow-sm'
+                            : 'text-stone-500 hover:text-stone-800'
                         }`}
+                        title="Grid View"
                       >
-                        1 Bed
+                        <LayoutGrid className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Grid</span>
                       </button>
                       <button
-                        onClick={() => setCatFilter('2beds')}
-                        className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                          catFilter === '2beds' ? 'bg-brand-500 text-white shadow-md' : 'bg-white text-stone-600 border border-stone-200 hover:bg-stone-100'
+                        onClick={() => setViewMode('list')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${
+                          viewMode === 'list'
+                            ? 'bg-white text-brand-600 shadow-sm'
+                            : 'text-stone-500 hover:text-stone-800'
                         }`}
+                        title="Easy List View"
                       >
-                        2 Beds
+                        <List className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Easy List</span>
                       </button>
-                      <button
-                        onClick={() => setCatFilter('3beds')}
-                        className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                          catFilter === '3beds' ? 'bg-brand-500 text-white shadow-md' : 'bg-white text-stone-600 border border-stone-200 hover:bg-stone-100'
-                        }`}
-                      >
-                        3 Beds
-                      </button>
-                    </>
-                  )}
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
 
+            {/* ═══════════════════════════════════════════════════════════════════ */}
+            {/* 3. ROOMS DISPLAY: GRID OR LIST MODE                                 */}
+            {/* ═══════════════════════════════════════════════════════════════════ */}
             {loading ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
                 {[1, 2, 3, 4, 5, 6].map((i) => (
                   <RoomCardSkeleton key={i} delayClass={`skeleton-delay-${(i % 3) + 1}`} />
                 ))}
               </div>
-            ) : (
+            ) : viewMode === 'grid' ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
                 {filteredRooms.map((room, i) => (
                   <RoomCard
@@ -503,9 +832,44 @@ export default function GuesthousesPage({ publicSettings, loadingSettings }) {
                   />
                 ))}
                 {filteredRooms.length === 0 && (
-                  <div className="col-span-full py-16 text-center text-stone-400">
-                    <i className="fa-solid fa-hotel text-5xl mb-3 opacity-30 block"></i>
-                    No rooms available in this category.
+                  <div className="col-span-full py-16 text-center text-stone-400 bg-white rounded-3xl border border-dashed border-stone-300 p-8">
+                    <i className="fa-solid fa-hotel text-5xl mb-3 opacity-30 block text-brand-500"></i>
+                    <h4 className="font-bold text-stone-700 text-base mb-1">No rooms match your criteria</h4>
+                    <p className="text-xs text-stone-400 mb-4 max-w-sm mx-auto">
+                      Try adjusting your category selection, floor filter, or search keywords.
+                    </p>
+                    <button
+                      onClick={clearFilters}
+                      className="btn-primary text-xs px-4 py-2"
+                    >
+                      Clear All Filters
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* EASY LIST VIEW */
+              <div className="space-y-4">
+                {filteredRooms.map((room) => (
+                  <RoomListRow
+                    key={room.id}
+                    room={room}
+                    onBook={handleOpenBooking}
+                  />
+                ))}
+                {filteredRooms.length === 0 && (
+                  <div className="py-16 text-center text-stone-400 bg-white rounded-3xl border border-dashed border-stone-300 p-8">
+                    <i className="fa-solid fa-hotel text-5xl mb-3 opacity-30 block text-brand-500"></i>
+                    <h4 className="font-bold text-stone-700 text-base mb-1">No rooms match your criteria</h4>
+                    <p className="text-xs text-stone-400 mb-4 max-w-sm mx-auto">
+                      Try adjusting your category selection, floor filter, or search keywords.
+                    </p>
+                    <button
+                      onClick={clearFilters}
+                      className="btn-primary text-xs px-4 py-2"
+                    >
+                      Clear All Filters
+                    </button>
                   </div>
                 )}
               </div>

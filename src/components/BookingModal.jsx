@@ -54,7 +54,10 @@ export default function BookingModal({ isOpen, onClose, type, itemName, pricePer
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-stone-100">
           <div>
-            <h2 className="text-lg font-bold text-stone-900">{type === 'motor' ? '🛵 Motor Booking' : '🏨 Room Booking'}</h2>
+            <h2 className="text-lg font-bold text-stone-900 flex items-center gap-2">
+              <i className={`fa-solid ${type === 'motor' ? 'fa-motorcycle text-brand-500' : 'fa-door-open text-indigo-500'}`}></i>
+              <span>{type === 'motor' ? 'Motor Booking' : 'Room Booking'}</span>
+            </h2>
             <p className="text-sm text-brand-500 font-medium">{itemName}</p>
           </div>
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center text-stone-400 hover:text-stone-700 hover:bg-stone-100 rounded-lg transition-colors">

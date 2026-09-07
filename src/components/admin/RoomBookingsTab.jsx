@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useModal } from '../common/ModalProvider';
-import { BookingService, syncBookingToOldSystem } from '../../services/DatabaseService';
+import { BookingService, HotelBookingService, syncBookingToOldSystem } from '../../services/DatabaseService';
 
 export default function RoomBookingsTab({
   bookings = [],
@@ -18,14 +18,57 @@ export default function RoomBookingsTab({
   btnDanger,
   statusBadge,
   today,
-  currency = 'USD'
+  currency = 'USD',
+  sendCategoryTelegramAlert,
+  tgSending
 }) {
   const { showModal, showConfirm } = useModal();
+  const [localTgSending, setLocalTgSending] = useState(false);
+
+  const handleRoomBookingsTelegramAlert = async () => {
+    setLocalTgSending(true);
+    try {
+      const roomBookings = (bookings || []).filter(b => b.type === 'room' || b.roomId || String(b.itemName || '').toLowerCase().includes('room'));
+      const activeCheckins = roomBookings.filter(b => b.status === 'checked_in').length;
+      const confirmed = roomBookings.filter(b => b.status === 'confirmed').length;
+      const pending = roomBookings.filter(b => b.status === 'pending').length;
+
+      if (sendCategoryTelegramAlert) {
+        await sendCategoryTelegramAlert({
+          category: 'Room Bookings',
+          title: 'Room Bookings & Occupancy Alert',
+          summary: `Total Room Bookings: ${roomBookings.length}.\nActive In-House: ${activeCheckins} | Confirmed: ${confirmed} | Pending: ${pending}`,
+          details: `Latest customer reservation check.`
+        });
+      } else {
+        const res = await fetch('/api/telegram/send-alert', {
+          method: 'POST',
+          headers: auth?.headers || { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            category: 'Room Bookings',
+            title: 'Room Bookings & Occupancy Alert',
+            summary: `Total Room Bookings: ${roomBookings.length}.\nActive In-House: ${activeCheckins} | Confirmed: ${confirmed} | Pending: ${pending}`,
+            details: `Latest customer reservation check.`
+          })
+        });
+        if (res.ok) {
+          showModal('success', 'Telegram Alert Sent', 'Room bookings alert sent to Telegram.');
+        } else {
+          showModal('error', 'Alert Error', 'Failed to send alert to Telegram.');
+        }
+      }
+    } catch (err) {
+      showModal('error', 'Network Error', err.message);
+    } finally {
+      setLocalTgSending(false);
+    }
+  };
 
   // Filters & view modes
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('date-desc');
   const [viewMode, setViewMode] = useState('cards'); // 'cards' | 'table'
 
   // Modals
@@ -47,6 +90,7 @@ export default function RoomBookingsTab({
     endDate: tomorrowStr,
     guests: 2,
     bedCount: 1,
+    bookingSource: 'Facebook',
     paymentMethod: 'cash',
     arrivalTime: '14:00 - 16:00',
     specialRequests: ''
@@ -64,10 +108,10 @@ export default function RoomBookingsTab({
     });
   }, [bookings]);
 
-  // Apply search & filters
+  // Apply search & filters & sorting
   const filteredBookings = useMemo(() => {
     const q = search.toLowerCase().trim();
-    return roomBookings.filter(b => {
+    const list = roomBookings.filter(b => {
       const matchSearch =
         !q ||
         String(b.customerName || '').toLowerCase().includes(q) ||
@@ -86,7 +130,42 @@ export default function RoomBookingsTab({
 
       return matchSearch && matchStatus && matchCat;
     });
-  }, [roomBookings, search, statusFilter, categoryFilter]);
+
+    list.sort((a, b) => {
+      if (sortBy === 'date-desc') {
+        const da = new Date(a.startDate || a.checkInDate || a.createdAt || 0).getTime();
+        const db = new Date(b.startDate || b.checkInDate || b.createdAt || 0).getTime();
+        return db - da;
+      }
+      if (sortBy === 'date-asc') {
+        const da = new Date(a.startDate || a.checkInDate || a.createdAt || 0).getTime();
+        const db = new Date(b.startDate || b.checkInDate || b.createdAt || 0).getTime();
+        return da - db;
+      }
+      if (sortBy === 'name-asc') {
+        return String(a.customerName || '').trim().localeCompare(String(b.customerName || '').trim(), 'km');
+      }
+      if (sortBy === 'name-desc') {
+        return String(b.customerName || '').trim().localeCompare(String(a.customerName || '').trim(), 'km');
+      }
+      if (sortBy === 'room-asc') {
+        return String(a.roomName || a.itemName || '').trim().localeCompare(String(b.roomName || b.itemName || '').trim(), undefined, { numeric: true });
+      }
+      if (sortBy === 'price-desc') {
+        const pA = Number(a.totalFee || a.price * a.totalDays || 0);
+        const pB = Number(b.totalFee || b.price * b.totalDays || 0);
+        return pB - pA;
+      }
+      if (sortBy === 'price-asc') {
+        const pA = Number(a.totalFee || a.price * a.totalDays || 0);
+        const pB = Number(b.totalFee || b.price * b.totalDays || 0);
+        return pA - pB;
+      }
+      return 0;
+    });
+
+    return list;
+  }, [roomBookings, search, statusFilter, categoryFilter, sortBy]);
 
   // Metrics
   const pendingCount = roomBookings.filter(b => (b.status || 'pending') === 'pending').length;
@@ -112,16 +191,20 @@ export default function RoomBookingsTab({
   };
 
   // ─── STATUS UPDATES ────────────────────────────────────────────────────────
-  const handleUpdateStatus = (id, newStatus) => {
+  // Use bookingRef when available (Firestore bookings have string ids that don't match SQLite)
+  const getDbIdentifier = (booking) => booking.bookingRef || booking.id;
+
+  const handleUpdateStatus = (id, newStatus, bookingRef) => {
+    // Optimistically update local state immediately
     setBookings(prev => prev.map(b => (b.id === id ? { ...b, status: newStatus } : b)));
-    fetch(`/api/bookings/${id}/status`, {
+    // Use bookingRef as the URL param if available — server matches by id OR bookingRef
+    const urlId = bookingRef || id;
+    return fetch(`/api/bookings/${urlId}/status`, {
       method: 'PATCH',
-      ...auth,
       headers: { 'Content-Type': 'application/json', ...(auth?.headers || {}) },
       body: JSON.stringify({ status: newStatus })
     }).catch(err => {
       console.error('Status update failed:', err);
-      if (fetchAll) fetchAll();
     });
   };
 
@@ -167,14 +250,14 @@ export default function RoomBookingsTab({
         throw new Error(errBody.error || `Server error ${occupancyRes.status}: Could not create check-in record.`);
       }
 
-      // 3. Mark booking as checked_in in bookings table + local state
-      handleUpdateStatus(booking.id, 'checked_in');
+      // 3. Mark booking as checked_in — pass bookingRef so DB match works
+      await handleUpdateStatus(booking.id, 'checked_in', booking.bookingRef);
 
-      showModal('success', 'Guest Checked In', `${booking.customerName} is now checked in to Room ${booking.roomName || resolvedRoomId || ''}.`);
-
-      // 4. Refresh ALL data so occupancy/history tabs update instantly
+      // 4. Refresh ALL data so occupancy/history tabs reflect the new checked_in status
       if (fetchAll) await fetchAll();
       if (fetchDash) fetchDash();
+
+      showModal('success', 'Guest Checked In', `${booking.customerName} is now checked in to Room ${booking.roomName || resolvedRoomName || resolvedRoomId || ''}.`);
     } catch (err) {
       console.error('Check-in failed:', err);
       showModal('error', 'Check-in Failed', err.message || 'Could not complete check-in. Please try again.');
@@ -182,14 +265,20 @@ export default function RoomBookingsTab({
   };
 
   // ─── DELETE BOOKING ────────────────────────────────────────────────────────
-  const handleDeleteBooking = async (id) => {
+  const handleDeleteBooking = async (booking) => {
     if (!await showConfirm('Delete Booking', 'Are you sure you want to permanently delete this reservation?', 'Delete', 'danger')) return;
-    setBookings(prev => prev.filter(b => b.id !== id));
-    fetch(`/api/bookings/${id}`, { method: 'DELETE', ...auth })
-      .catch(err => {
-        console.error('Delete error:', err);
-        if (fetchAll) fetchAll();
-      });
+    setBookings(prev => prev.filter(b => b.id !== booking.id));
+    BookingService.delete(booking.id).catch(() => {});
+    HotelBookingService.delete(booking.id).catch(() => {});
+    // Use bookingRef as identifier so SQLite can find it
+    const urlId = booking.bookingRef || booking.id;
+    fetch(`/api/bookings/${urlId}`, {
+      method: 'DELETE',
+      headers: { ...(auth?.headers || {}) }
+    }).catch(err => {
+      console.error('Delete error:', err);
+      if (fetchAll) fetchAll();
+    });
   };
 
   // ─── CREATE NEW ROOM BOOKING (MANUAL) ──────────────────────────────────────
@@ -234,6 +323,7 @@ export default function RoomBookingsTab({
       totalFee,
       paymentMethod: newForm.paymentMethod,
       arrivalTime: newForm.arrivalTime,
+      bookingSource: newForm.bookingSource || 'Direct / Social',
       specialRequests: newForm.specialRequests.trim(),
       bookingRef,
       status: 'confirmed',
@@ -267,6 +357,7 @@ export default function RoomBookingsTab({
         endDate: tomorrowStr,
         guests: 2,
         bedCount: 1,
+        bookingSource: 'Facebook',
         paymentMethod: 'cash',
         arrivalTime: '14:00 - 16:00',
         specialRequests: ''
@@ -276,6 +367,88 @@ export default function RoomBookingsTab({
       if (fetchAll) fetchAll();
     } catch (err) {
       showModal('error', 'Booking Failed', err.message);
+    }
+  };
+
+  // ─── EDIT ROOM BOOKING HANDLERS ──────────────────────────────────────────
+  const [editForm, setEditForm] = useState({
+    customerName: '',
+    phone: '',
+    email: '',
+    nationality: '',
+    roomId: '',
+    startDate: '',
+    endDate: '',
+    guests: 1,
+    bedCount: 1,
+    paymentMethod: 'cash',
+    status: 'confirmed',
+    specialRequests: '',
+    pricePerDay: 25,
+    totalFee: 25
+  });
+
+  const handleStartEditBooking = (b) => {
+    setEditingBooking(b);
+    setEditForm({
+      customerName: b.customerName || b.name || '',
+      phone: b.phone || b.customerPhone || '',
+      email: b.email || '',
+      nationality: b.nationality || '',
+      roomId: b.roomId || '',
+      startDate: b.startDate || b.checkInDate || '',
+      endDate: b.endDate || b.checkOutDate || '',
+      guests: Number(b.guests || 1),
+      bedCount: Number(b.bedCount || 1),
+      paymentMethod: b.paymentMethod || 'cash',
+      status: b.status || 'confirmed',
+      specialRequests: b.specialRequests || b.notes || '',
+      pricePerDay: Number(b.pricePerDay || b.price || 25),
+      totalFee: Number(b.totalFee || b.pricePerDay * b.totalDays || 25)
+    });
+  };
+
+  const handleSaveBookingEdit = async (e) => {
+    e.preventDefault();
+    if (!editingBooking) return;
+    try {
+      const selectedR = rooms.find(r => String(r.id) === String(editForm.roomId));
+      const roomName = selectedR ? selectedR.name : (editingBooking.roomName || '101');
+      const categoryName = selectedR ? selectedR.categoryName : (editingBooking.categoryName || 'Standard');
+
+      const start = new Date(editForm.startDate);
+      const end = new Date(editForm.endDate);
+      const nights = Math.max(1, Math.ceil((end - start) / 86400000) || 1);
+      const nightlyRate = Number(editForm.pricePerDay || selectedR?.price || 25);
+      const totalFee = editForm.totalFee ? Number(editForm.totalFee) : nightlyRate * nights;
+
+      const updated = {
+        ...editingBooking,
+        ...editForm,
+        roomName,
+        categoryName,
+        itemName: `Room ${roomName} (${categoryName})`,
+        totalDays: nights,
+        pricePerDay: nightlyRate,
+        totalFee
+      };
+
+      setBookings(prev => (prev || []).map(b => b.id === updated.id ? updated : b));
+      setEditingBooking(null);
+
+      await BookingService.update(updated.id, updated).catch(async () => {
+        await fetch(`/api/bookings/${updated.id}`, {
+          method: 'PUT',
+          headers: { ...(auth?.headers || {}), 'Content-Type': 'application/json' },
+          body: JSON.stringify(updated)
+        });
+      });
+
+      showModal('success', 'Booking Updated', `Reservation for ${updated.customerName} (Room ${roomName}) updated successfully.`);
+      if (fetchAll) fetchAll();
+      if (fetchDash) fetchDash();
+    } catch (err) {
+      showModal('error', 'Update Error', err.message);
     }
   };
 
@@ -385,6 +558,22 @@ export default function RoomBookingsTab({
             ))}
           </select>
 
+          {/* Sort Dropdown */}
+          <select
+            value={sortBy}
+            onChange={e => setSortBy(e.target.value)}
+            className="bg-stone-50 border border-stone-200 rounded-xl px-3 py-1.5 text-xs font-bold text-stone-700 outline-none cursor-pointer shadow-2xs"
+            title="តម្រៀប (Sort)"
+          >
+            <option value="date-desc">Check-in: ថ្មីមុន (Newest)</option>
+            <option value="date-asc">Check-in: ចាស់មុន (Oldest)</option>
+            <option value="name-asc">ឈ្មោះភ្ញៀវ: A ដល់ Z (Name: A - Z)</option>
+            <option value="name-desc">ឈ្មោះភ្ញៀវ: Z ដល់ A (Name: Z - A)</option>
+            <option value="room-asc">លេខបន្ទប់: A ដល់ Z (Room: A - Z)</option>
+            <option value="price-desc">តម្លៃសរុប: ខ្ពស់ទៅទាប (Price: High)</option>
+            <option value="price-asc">តម្លៃសរុប: ទាបទៅខ្ពស់ (Price: Low)</option>
+          </select>
+
           {/* View Mode Toggle */}
           <div className="flex bg-stone-100 p-1 rounded-xl text-xs font-bold text-stone-600">
             <button
@@ -409,15 +598,45 @@ export default function RoomBookingsTab({
             </button>
           </div>
 
+          {/* Print & Alert to Telegram */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="px-3 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
+              title="បោះពុម្ពបញ្ជីការកក់បន្ទប់ (Print Room Bookings)"
+            >
+              <i className="fa-solid fa-print text-stone-600"></i>
+              <span>Print</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleRoomBookingsTelegramAlert}
+              disabled={tgSending || localTgSending}
+              className="px-3 py-2 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-2xs disabled:opacity-50 cursor-pointer"
+              title="ផ្ញើការកក់បន្ទប់ទៅ Telegram"
+            >
+              <i className="fa-brands fa-telegram text-sky-500"></i>
+              <span>Alert Telegram</span>
+            </button>
+          </div>
+
           {/* New Booking Button */}
           <button
             type="button"
             onClick={() => setNewBookingModalOpen(true)}
-            className={`${btnPrimary} flex items-center gap-1.5 shrink-0 text-xs py-2 px-3.5`}
+            className={`${btnPrimary} flex items-center gap-1.5 shrink-0 text-xs py-2 px-3.5 cursor-pointer`}
           >
             <i className="fa-solid fa-calendar-plus"></i> New Room Reservation
           </button>
         </div>
+      </div>
+
+      {/* Printable Report Header */}
+      <div className="print-only mb-4 p-4 border-b border-stone-300">
+        <h2 className="text-xl font-bold">Motorental Siemreab Angkor & Guesthouse</h2>
+        <p className="text-sm text-stone-700 font-semibold">Customer Room Reservations & Occupancy Manifest</p>
+        <p className="text-xs text-stone-500">Total Bookings: {filteredBookings.length} | Printed: {new Date().toLocaleString()}</p>
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════ */}
@@ -453,9 +672,22 @@ export default function RoomBookingsTab({
                       </span>
                     </div>
 
-                    <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${bookingStatusBadge[bStatus] || bookingStatusBadge.confirmed}`}>
-                      {bStatus === 'checked_in' ? 'Checked In' : bStatus}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      {b.bookingSource && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 flex items-center gap-1 shadow-2xs">
+                          {b.bookingSource.includes('Facebook') && <i className="fa-brands fa-facebook text-blue-600"></i>}
+                          {b.bookingSource.includes('Telegram') && <i className="fa-brands fa-telegram text-sky-500"></i>}
+                          {b.bookingSource.includes('WhatsApp') && <i className="fa-brands fa-whatsapp text-emerald-600"></i>}
+                          {b.bookingSource.includes('Phone') && <i className="fa-solid fa-phone text-amber-600"></i>}
+                          {b.bookingSource.includes('Walk') && <i className="fa-solid fa-person-walking text-purple-600"></i>}
+                          {b.bookingSource.includes('TikTok') && <i className="fa-brands fa-tiktok text-stone-900"></i>}
+                          {b.bookingSource}
+                        </span>
+                      )}
+                      <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${bookingStatusBadge[bStatus] || bookingStatusBadge.confirmed}`}>
+                        {bStatus === 'checked_in' ? 'Checked In' : bStatus}
+                      </span>
+                    </div>
                   </div>
 
                   {/* Room & Bed Details */}
@@ -482,8 +714,9 @@ export default function RoomBookingsTab({
                         <span className="text-[10px] font-bold text-stone-400 uppercase block">Check-in</span>
                         <span className="font-bold text-stone-800">{b.startDate}</span>
                       </div>
-                      <div className="text-center px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 text-[10px] font-black border border-brand-200">
-                        🌙 {b.totalDays || 1} Night{b.totalDays > 1 ? 's' : ''}
+                      <div className="text-center px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 text-[10px] font-black border border-brand-200 flex items-center gap-1">
+                        <i className="fa-solid fa-moon text-[9px] text-brand-600"></i>
+                        <span>{b.totalDays || 1} Night{b.totalDays > 1 ? 's' : ''}</span>
                       </div>
                       <div className="text-right">
                         <span className="text-[10px] font-bold text-stone-400 uppercase block">Check-out</span>
@@ -579,6 +812,14 @@ export default function RoomBookingsTab({
                   <div className="flex items-center gap-1.5">
                     <button
                       type="button"
+                      onClick={() => handleStartEditBooking(b)}
+                      className="px-2.5 py-1 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold hover:bg-blue-100 transition-colors flex items-center gap-1"
+                      title="Edit Reservation"
+                    >
+                      <i className="fa-solid fa-pen text-[10px]"></i> Edit
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setDetailBooking(b)}
                       className="px-2.5 py-1 bg-white border border-stone-300 rounded-lg text-xs font-bold text-stone-700 hover:bg-stone-100 transition-colors flex items-center gap-1"
                     >
@@ -586,7 +827,7 @@ export default function RoomBookingsTab({
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleDeleteBooking(b.id)}
+                      onClick={() => handleDeleteBooking(b)}
                       className="w-7 h-7 flex items-center justify-center text-rose-500 hover:bg-rose-100 rounded-lg transition-colors"
                       title="Delete"
                     >
@@ -692,6 +933,14 @@ export default function RoomBookingsTab({
                           )}
                           <button
                             type="button"
+                            onClick={() => handleStartEditBooking(b)}
+                            className="w-7 h-7 flex items-center justify-center text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+                            title="Edit Reservation"
+                          >
+                            <i className="fa-solid fa-pen text-xs"></i>
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => setDetailBooking(b)}
                             className="w-7 h-7 flex items-center justify-center text-stone-600 bg-stone-100 hover:bg-stone-200 rounded-lg"
                             title="View Full Voucher"
@@ -700,7 +949,7 @@ export default function RoomBookingsTab({
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleDeleteBooking(b.id)}
+                            onClick={() => handleDeleteBooking(b)}
                             className="w-7 h-7 flex items-center justify-center text-rose-500 hover:bg-rose-100 rounded-lg"
                             title="Delete"
                           >
@@ -843,6 +1092,16 @@ export default function RoomBookingsTab({
               </button>
 
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleStartEditBooking(detailBooking);
+                    setDetailBooking(null);
+                  }}
+                  className="px-4 py-2 bg-blue-50 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold hover:bg-blue-100 transition-colors flex items-center gap-1.5"
+                >
+                  <i className="fa-solid fa-pen"></i> Edit Booking
+                </button>
                 {detailBooking.status !== 'checked_in' && (
                   <button
                     type="button"
@@ -972,8 +1231,28 @@ export default function RoomBookingsTab({
                 </div>
               </div>
 
-              {/* Payment & Arrival */}
-              <div className="grid grid-cols-2 gap-3">
+              {/* Booking Channel / Source & Payment & Arrival */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className={labelCls}>
+                    <i className="fa-solid fa-share-nodes mr-1 text-blue-500"></i>
+                    Booking Source (ប្រភពកក់)
+                  </label>
+                  <select
+                    value={newForm.bookingSource}
+                    onChange={e => setNewForm({ ...newForm, bookingSource: e.target.value })}
+                    className={inputCls}
+                  >
+                    <option value="Facebook">Facebook / Messenger</option>
+                    <option value="Telegram">Telegram</option>
+                    <option value="WhatsApp">WhatsApp</option>
+                    <option value="Phone Call">Phone Call (ទូរស័ព្ទ)</option>
+                    <option value="Walk-in">Walk-In (ភ្ញៀវផ្ទាល់)</option>
+                    <option value="TikTok">TikTok</option>
+                    <option value="Website">Website (គេហទំព័រ)</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
                 <div>
                   <label className={labelCls}>Payment Method</label>
                   <select
@@ -1025,6 +1304,216 @@ export default function RoomBookingsTab({
                   className={btnPrimary}
                 >
                   <i className="fa-solid fa-check mr-1.5"></i> Create Reservation
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ───────────────────────────────────────────────────────────────────── */}
+      {/* 7. MODAL: EDIT ROOM RESERVATION                                     */}
+      {/* ───────────────────────────────────────────────────────────────────── */}
+      {editingBooking && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-stone-200 my-8 max-h-[90vh] overflow-y-auto modal-pop">
+            <div className="flex items-center justify-between pb-4 border-b border-stone-100 mb-5">
+              <div>
+                <h4 className="font-bold text-lg text-stone-900 flex items-center gap-2">
+                  <i className="fa-solid fa-pen-to-square text-brand-500"></i>
+                  <span>Edit Reservation: <strong className="text-brand-600">{editingBooking.bookingRef || `#${editingBooking.id}`}</strong></span>
+                </h4>
+                <p className="text-xs text-stone-500 mt-0.5">Modify guest details, room, dates, and status</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingBooking(null)}
+                className="w-8 h-8 rounded-full bg-stone-100 text-stone-400 hover:text-stone-700 flex items-center justify-center"
+              >
+                <i className="fa-solid fa-times text-sm"></i>
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveBookingEdit} className="space-y-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Guest Full Name <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    required
+                    value={editForm.customerName}
+                    onChange={e => setEditForm({ ...editForm, customerName: e.target.value })}
+                    className={inputCls}
+                  />
+                </div>
+                <div>
+                  <label className={labelCls}>Phone / WhatsApp / Telegram <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    required
+                    value={editForm.phone}
+                    onChange={e => setEditForm({ ...editForm, phone: e.target.value })}
+                    className={inputCls}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Email Address</label>
+                  <input
+                    type="email"
+                    value={editForm.email}
+                    onChange={e => setEditForm({ ...editForm, email: e.target.value })}
+                    className={inputCls}
+                  />
+                </div>
+                <div>
+                  <label className={labelCls}>Nationality / Passport</label>
+                  <input
+                    type="text"
+                    value={editForm.nationality}
+                    onChange={e => setEditForm({ ...editForm, nationality: e.target.value })}
+                    className={inputCls}
+                  />
+                </div>
+              </div>
+
+              {/* Room Selection */}
+              <div>
+                <label className={labelCls}>Assigned Physical Room</label>
+                <select
+                  value={editForm.roomId}
+                  onChange={e => {
+                    const sel = rooms.find(r => String(r.id) === String(e.target.value));
+                    setEditForm({
+                      ...editForm,
+                      roomId: e.target.value,
+                      pricePerDay: sel?.price || sel?.rate || editForm.pricePerDay
+                    });
+                  }}
+                  className={inputCls}
+                >
+                  <option value="">Select Room...</option>
+                  {rooms.map(r => (
+                    <option key={r.id} value={r.id}>
+                      Room {r.name} — {r.categoryName || `${r.bedCount || 1} Bed`} (${r.price || r.rate || 25}/night)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Check-In Date</label>
+                  <input
+                    type="date"
+                    required
+                    value={editForm.startDate}
+                    onChange={e => setEditForm({ ...editForm, startDate: e.target.value })}
+                    className={inputCls}
+                  />
+                </div>
+                <div>
+                  <label className={labelCls}>Check-Out Date</label>
+                  <input
+                    type="date"
+                    required
+                    value={editForm.endDate}
+                    onChange={e => setEditForm({ ...editForm, endDate: e.target.value })}
+                    className={inputCls}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className={labelCls}>Guests</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="10"
+                    value={editForm.guests}
+                    onChange={e => setEditForm({ ...editForm, guests: parseInt(e.target.value) || 1 })}
+                    className={inputCls}
+                  />
+                </div>
+                <div>
+                  <label className={labelCls}>Bed Count</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="6"
+                    value={editForm.bedCount}
+                    onChange={e => setEditForm({ ...editForm, bedCount: parseInt(e.target.value) || 1 })}
+                    className={inputCls}
+                  />
+                </div>
+                <div>
+                  <label className={labelCls}>Rate / Night ($)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={editForm.pricePerDay}
+                    onChange={e => setEditForm({ ...editForm, pricePerDay: parseFloat(e.target.value) || 0 })}
+                    className={inputCls}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Payment Method</label>
+                  <select
+                    value={editForm.paymentMethod}
+                    onChange={e => setEditForm({ ...editForm, paymentMethod: e.target.value })}
+                    className={inputCls}
+                  >
+                    <option value="cash">Cash on Arrival (សាច់ប្រាក់)</option>
+                    <option value="aba_qr">ABA KHQR (Pay Now)</option>
+                    <option value="bank_transfer">Bank Transfer</option>
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>Booking Status</label>
+                  <select
+                    value={editForm.status}
+                    onChange={e => setEditForm({ ...editForm, status: e.target.value })}
+                    className={inputCls}
+                  >
+                    <option value="pending">Pending (រង់ចាំ)</option>
+                    <option value="confirmed">Confirmed (បានបញ្ជាក់)</option>
+                    <option value="checked_in">Checked In (បានចូលស្នាក់នៅ)</option>
+                    <option value="checked_out">Checked Out (បានចាកចេញ)</option>
+                    <option value="cancelled">Cancelled (បានបោះបង់)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className={labelCls}>Special Requests / Notes</label>
+                <textarea
+                  rows="2"
+                  value={editForm.specialRequests}
+                  onChange={e => setEditForm({ ...editForm, specialRequests: e.target.value })}
+                  placeholder="Quiet room, extra pillow, etc."
+                  className={inputCls}
+                ></textarea>
+              </div>
+
+              <div className="pt-3 border-t border-stone-100 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingBooking(null)}
+                  className={btnSecondary}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className={btnPrimary}
+                >
+                  <i className="fa-solid fa-check mr-1.5"></i> Update Reservation
                 </button>
               </div>
             </form>

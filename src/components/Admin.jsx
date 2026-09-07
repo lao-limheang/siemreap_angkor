@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { dbMotos, dbRooms as firedb } from '../firebase';
 import { io } from 'socket.io-client';
+import { createSocket } from '../services/socket';
 import { AdminStatsSkeleton, AdminTableSkeleton, AdminChartSkeleton, Skeleton } from './Skeleton';
 import {
   MotoService,
@@ -15,7 +16,8 @@ import {
   CustomerService,
   ExpenseService,
   MaintenanceService,
-  ReturnService
+  ReturnService,
+  HotelBookingService
 } from '../services/DatabaseService';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import CheckoutTab from './admin/CheckoutTab';
@@ -35,7 +37,8 @@ import CustomerDocsTab from './admin/CustomerDocsTab';
 import BookingStockTab from './admin/BookingStockTab';
 import RoomsTab from './admin/RoomsTab';
 import RoomBookingsTab from './admin/RoomBookingsTab';
-import { normalizeRental, normalizeBooking, normalizeRoom, normalizeMoto, normalizeBedCategory, asArray, toDateStr } from '../utils/dataNormalizer';
+import SettingsTab from './admin/SettingsTab';
+import { normalizeRental, normalizeBooking, normalizeRoom, normalizeMoto, normalizeModel, normalizeBedCategory, asArray, toDateStr } from '../utils/dataNormalizer';
 import { fileToBase64 } from '../utils/imageUtils';
 import PaginationControls from './common/PaginationControls';
 
@@ -96,6 +99,16 @@ const btnPrimary = "px-4 py-2 bg-brand-500 text-white text-sm font-bold rounded-
 const btnSecondary = "px-4 py-2 bg-white border border-stone-200 text-stone-700 text-sm font-bold rounded-lg hover:bg-stone-50 transition-colors";
 const btnDanger   = "px-4 py-2 bg-red-50 border border-red-100 text-red-600 text-sm font-bold rounded-lg hover:bg-red-100 transition-colors";
 
+// Helper to sort rentals chronologically descending (newest first)
+const sortRentalsDesc = (list) => {
+  if (!Array.isArray(list)) return [];
+  return [...list].sort((a, b) => {
+    const da = new Date(a.startDate || a.checkoutDate || a.createdAt || 0).getTime();
+    const db = new Date(b.startDate || b.checkoutDate || b.createdAt || 0).getTime();
+    return db - da;
+  });
+};
+
 // ══════════════════════════════════════════════════════════════════════════════
 //  MAIN ADMIN COMPONENT
 // ══════════════════════════════════════════════════════════════════════════════
@@ -106,6 +119,7 @@ export default function Admin() {
   const [loginError, setLoginError] = useState('');
   const [activeTab, setActiveTab] = useState('dashboard');
   const [newBookingAlert, setNewBookingAlert] = useState(false);
+  const [isLiveConnected, setIsLiveConnected] = useState(false);
   const [loadingData, setLoadingData] = useState(true);
   const [loadingReports, setLoadingReports] = useState(false);
 
@@ -137,8 +151,11 @@ export default function Admin() {
     pricing_tax: { primaryCurrency: 'USD', secondaryCurrency: 'KHR', exchangeRate: 4100, vatPercent: 10, serviceChargePercent: 5, cleaningFee: 5, lateCheckoutPerHour: 5, lateReturnPerHour: 3, highSeasonActive: false, highSeasonMultiplier: 1.2 },
     payment_methods: { cashEnabled: true, abaKhqrEnabled: true, abaAccountName: 'MOTOR RENTAL SIEM REAP ANGKOR', abaAccountNumber: '016 308 199 (USD)', abaQrImage: '', cardEnabled: true, bankTransferEnabled: true },
     invoice_settings: { companyHeader: 'Siem Reap Angkor Guesthouse & Motor Rentals', taxNumber: 'K002-901829381', footerNote: 'Thank you for choosing Siem Reap Angkor! Safe travels around the temples.', terms: 'Please retain this invoice for your records. All damage and late return fees are subject to inspection.' },
-    notification_settings: { telegramNewBooking: true, telegramMaintenanceAlert: true, telegramCheckoutReminder: true, guestVoucherTemplate: 'Hello {guest_name}, your booking at Siem Reap Angkor for {item_name} ({start_date} to {end_date}) is CONFIRMED! Contact: +855 016 308 199', guestReminderTemplate: 'Dear {guest_name}, friendly reminder that your check-in date is tomorrow {start_date}. We look forward to welcoming you!' },
-    security_settings: { autoBackupEnabled: true, backupFrequency: 'daily', requireStrongPasswords: true, sessionTimeoutMinutes: 120 }
+    notification_settings: { telegramNewBooking: true, telegramMaintenanceAlert: true, telegramCheckoutReminder: true, emailNotificationEnabled: false, recipientEmail: 'yourshop@email.com', returnReminderEnabled: true, returnReminderLeadDays: 1, maintenanceReminderEnabled: true, maintenanceReminderInterval: 15, guestVoucherTemplate: 'Hello {guest_name}, your booking at Siem Reap Angkor for {item_name} ({start_date} to {end_date}) is CONFIRMED! Contact: +855 016 308 199', guestReminderTemplate: 'Dear {guest_name}, friendly reminder that your check-in date is tomorrow {start_date}. We look forward to welcoming you!' },
+    security_settings: { autoBackupEnabled: true, backupFrequency: 'daily', requireStrongPasswords: true, sessionTimeoutMinutes: 120 },
+    shop_settings: { shopName: 'Motorental Siemreab Angkor', logo: '/assets/logo.png', rentalHoursPerDay: 12, operatingHoursOpen: '06:00 AM', operatingHoursClose: '10:00 PM', depositDocTypes: "National ID, Passport, Driver's License, Birth Certificate, None" },
+    theme_settings: { presetName: 'Angkor Terracotta', primaryColor: '#c0622b' },
+    telegram_settings: { botToken: '', chatId: '', rentalAlertTemplate: '', returnAlertTemplate: '', revenueAlertTemplate: '' }
   });
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [testResult, setTestResult] = useState(null);
@@ -153,6 +170,32 @@ export default function Admin() {
   const mapSafe = (arr, fn) => (Array.isArray(arr) ? arr.map(item => {
     try { return fn(item); } catch (err) { console.error(err); return item; }
   }) : []);
+
+  // ── Telegram Category Alert State & Helper ────────────────────────────────────
+  const [tgSending, setTgSending] = useState(false);
+  const [tgAlertToast, setTgAlertToast] = useState(null);
+
+  const sendCategoryTelegramAlert = async ({ category, title, summary, stats, details }) => {
+    setTgSending(true);
+    try {
+      const res = await fetch('/api/telegram/send-alert', {
+        method: 'POST',
+        headers: auth.headers,
+        body: JSON.stringify({ category, title, summary, stats, details })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setTgAlertToast({ type: 'success', text: `Telegram Alert for "${category}" sent successfully!` });
+      } else {
+        setTgAlertToast({ type: 'error', text: `Failed to send alert: ${data.error || 'Please check Telegram Bot Token in Settings'}` });
+      }
+    } catch (err) {
+      setTgAlertToast({ type: 'error', text: `Network error: ${err.message}` });
+    } finally {
+      setTgSending(false);
+      setTimeout(() => setTgAlertToast(null), 5000);
+    }
+  };
 
   // ── fetch helpers ────────────────────────────────────────────────────────────
   const fetchAll = useCallback(async () => {
@@ -175,11 +218,11 @@ export default function Admin() {
         BedCategoryService.getAll().then(res => res && res.length ? res : fetch('/api/bed-categories', hdrs).then(r=>r.json()).catch(()=>[])).catch(()=>[]),
       ]);
       const safeGuests = Array.isArray(g) ? g : [];
-      const safeModels = Array.isArray(mdls) ? mdls : [];
+      const safeModels = mapSafe(mdls, normalizeModel);
       const safeCategories = mapSafe(cats, normalizeBedCategory);
       const safeBikes = mapSafe(b, x => normalizeMoto(x, safeModels));
       const safeRooms = mapSafe(r, x => normalizeRoom(x, safeCategories));
-      const safeRentals = mapSafe(rn, x => normalizeRental(x, safeGuests, safeBikes, safeModels));
+      const safeRentals = sortRentalsDesc(mapSafe(rn, x => normalizeRental(x, safeGuests, safeBikes, safeModels)));
       const safeBookings = mapSafe(bk, x => normalizeBooking(x, safeGuests, safeBikes, safeModels));
 
       setGuests(safeGuests);
@@ -227,7 +270,7 @@ export default function Admin() {
       .then(data => {
         if (data && typeof data === 'object') {
           const parsed = {};
-          ['hero_images','about_us','why_us','services_bar','testimonials','contact_info','business_profile','pricing_tax','payment_methods','invoice_settings','notification_settings','security_settings','public_texts'].forEach(k => {
+          ['hero_images','about_us','why_us','services_bar','testimonials','contact_info','business_profile','pricing_tax','payment_methods','invoice_settings','notification_settings','security_settings','public_texts','shop_settings','theme_settings','telegram_settings'].forEach(k => {
             if (data[k]) {
               try {
                 parsed[k] = typeof data[k] === 'string' ? JSON.parse(data[k]) : data[k];
@@ -270,12 +313,12 @@ export default function Admin() {
     });
     const unsubModels = BikeModelService.subscribe((firestoreModels) => {
       if (firestoreModels && firestoreModels.length > 0) {
-        setModels(firestoreModels);
+        setModels(mapSafe(firestoreModels, normalizeModel));
       }
     });
     const unsubRentals = RentalService.subscribe((firestoreRentals) => {
       if (firestoreRentals && firestoreRentals.length > 0) {
-        setRentals(mapSafe(firestoreRentals, x => normalizeRental(x, guests, bikes, models)));
+        setRentals(sortRentalsDesc(mapSafe(firestoreRentals, x => normalizeRental(x, guests, bikes, models))));
       }
     });
     const unsubBookings = BookingService.subscribe((firestoreBookings) => {
@@ -305,14 +348,60 @@ export default function Admin() {
         setMaintenance(firestoreMaint);
       }
     });
+    const unsubHBookings = HotelBookingService.subscribe((firestoreHBookings) => {
+      if (firestoreHBookings && firestoreHBookings.length > 0) {
+        fetchAll();
+      }
+    });
+    const unsubExpenses = ExpenseService.subscribe((firestoreExp) => {
+      if (firestoreExp && firestoreExp.length > 0) {
+        fetchDash();
+      }
+    });
 
-    const socketUrl = window.location.hostname==='localhost' ? 'http://localhost:3000' : '/';
-    const socket = io(socketUrl);
-    socket.on('new_booking', () => { fetchAll(); fetchDash(); setNewBookingAlert(true); setTimeout(()=>setNewBookingAlert(false),5000); });
+    const playChime = () => {
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+        osc.frequency.setValueAtTime(880, ctx.currentTime + 0.12);
+        gain.gain.setValueAtTime(0.2, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.55);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.55);
+      } catch (e) {}
+    };
+
+    const socket = createSocket();
+    socket.on('connect', () => setIsLiveConnected(true));
+    socket.on('disconnect', () => setIsLiveConnected(false));
+
+    socket.on('new_booking', () => {
+      fetchAll();
+      fetchDash();
+      playChime();
+      setNewBookingAlert(true);
+      setTimeout(() => setNewBookingAlert(false), 5000);
+    });
+    socket.on('booking_updated', () => { fetchAll(); fetchDash(); });
     socket.on('room_status_updated', () => { fetchAll(); fetchDash(); });
+    socket.on('rooms_updated', () => { fetchAll(); fetchDash(); });
+    socket.on('room_occupancy_updated', () => { fetchAll(); fetchDash(); });
     socket.on('bed_categories_updated', () => { fetchAll(); });
     socket.on('bike_status_updated', () => { fetchAll(); fetchDash(); });
-    socket.on('booking_updated', () => { fetchAll(); });
+    socket.on('bikes_updated', () => { fetchAll(); fetchDash(); });
+    socket.on('rental_updated', () => { fetchAll(); fetchDash(); });
+    socket.on('invoices_updated', () => { fetchAll(); fetchDash(); });
+    socket.on('expenses_updated', () => { fetchAll(); fetchDash(); });
+    socket.on('maintenance_updated', () => { fetchAll(); });
+    socket.on('housekeeping_updated', () => { fetchAll(); });
+    socket.on('guests_updated', () => { fetchAll(); });
     socket.on('settings_updated', () => { fetchSettings(); });
 
     return () => {
@@ -324,6 +413,8 @@ export default function Admin() {
       unsubRooms();
       unsubBedCategories();
       unsubMaintenance();
+      unsubHBookings();
+      unsubExpenses();
       socket.disconnect();
     };
   }, [token]);
@@ -349,10 +440,28 @@ export default function Admin() {
   };
   const handleLogout = () => { localStorage.removeItem('token'); setToken(null); };
 
-  const saveSettings = async (customPayload) => {
+  const saveSettings = async (customPayload, options = {}) => {
     try {
       const payloadToSend = customPayload && typeof customPayload === 'object' && !customPayload.nativeEvent ? { ...settings, ...customPayload } : settings;
       
+      // 1. Optimistic UI update immediately
+      setSettings(prev => ({ ...prev, ...payloadToSend }));
+      setSettingsSaved(true);
+      setTimeout(() => setSettingsSaved(false), 3000);
+
+      // 2. Parallel background sync to Firestore (non-blocking for ultra-fast UI)
+      try {
+        Promise.allSettled([
+          setDoc(doc(dbMotos, 'settings', 'public_settings'), payloadToSend, { merge: true }),
+          payloadToSend.shop_settings ? setDoc(doc(dbMotos, 'settings', 'shop_settings'), payloadToSend.shop_settings, { merge: true }) : null,
+          payloadToSend.theme_settings ? setDoc(doc(dbMotos, 'settings', 'theme_settings'), payloadToSend.theme_settings, { merge: true }) : null,
+          payloadToSend.telegram_settings ? setDoc(doc(dbMotos, 'settings', 'telegram_settings'), payloadToSend.telegram_settings, { merge: true }) : null,
+        ].filter(Boolean)).catch(fbErr => console.warn('Firestore settings sync:', fbErr.message));
+      } catch (fbErr) {
+        console.warn('Firestore sync non-blocking error:', fbErr);
+      }
+
+      // 3. Fast server POST
       let res = await fetch('/api/settings', authPost(payloadToSend));
 
       // If forbidden / unauthorized, auto-refresh token using admin credentials
@@ -380,24 +489,19 @@ export default function Admin() {
         }
       }
 
-      // Also sync to Firestore public_settings
-      try {
-        await setDoc(doc(dbMotos, 'settings', 'public_settings'), payloadToSend, { merge: true });
-      } catch (fbErr) {
-        console.warn('Firestore settings sync:', fbErr.message);
-      }
-
       if (res.ok) {
-        setSettingsSaved(true);
-        setTimeout(() => setSettingsSaved(false), 3000);
-        fetchSettings();
-        showModal('success', 'រក្សាទុកជោគជ័យ!', 'ការកំណត់ និង រូបភាពត្រូវបានរក្សាទុកដោយជោគជ័យ (Settings & images saved successfully)');
+        if (!options.silent) {
+          showModal('success', 'រក្សាទុកជោគជ័យ!', 'ការកំណត់ត្រូវបានរក្សាទុកដោយជោគជ័យ (Settings saved successfully)');
+        }
+        return { success: true };
       } else {
         const err = await res.json().catch(() => ({}));
         showModal('error', 'មិនអាចរក្សាទុកបានទេ', err.error || res.statusText || 'Failed to save settings');
+        return { success: false, error: err.error };
       }
     } catch (e) {
       showModal('error', 'កំហុសបច្ចេកទេស', e.message);
+      return { success: false, error: e.message };
     }
   };
 
@@ -511,6 +615,15 @@ export default function Admin() {
             <p className="text-xs text-stone-500">{new Date().toLocaleDateString('en-GB',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p>
           </div>
           <div className="flex items-center gap-3">
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors ${
+              isLiveConnected ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'
+            }`}>
+              <span className="relative flex h-2 w-2">
+                {isLiveConnected && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>}
+                <span className={`relative inline-flex rounded-full h-2 w-2 ${isLiveConnected ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+              </span>
+              <span>{isLiveConnected ? 'Live Real-Time' : 'Connecting...'}</span>
+            </div>
             {dashStats && (
               <>
                 <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200/70 px-3 py-1.5 rounded-xl text-xs font-bold text-emerald-700">
@@ -526,11 +639,35 @@ export default function Admin() {
 
         <div className="p-6 md:p-8 space-y-6">
 
+          {/* Floating Toast for Telegram Alerts */}
+          {tgAlertToast && (
+            <div className={`fixed top-5 right-5 z-50 px-4 py-3 rounded-2xl shadow-xl border text-xs font-bold flex items-center gap-2.5 transition-all no-print animate-in fade-in slide-in-from-top-3 ${
+              tgAlertToast.type === 'success'
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                : 'bg-rose-50 text-rose-800 border-rose-300'
+            }`}>
+              <i className={`fa-solid ${tgAlertToast.type === 'success' ? 'fa-circle-check text-emerald-600' : 'fa-circle-exclamation text-rose-600'} text-base`}></i>
+              <span>{tgAlertToast.text}</span>
+            </div>
+          )}
+
           {/* ═══════════════════════════════════════════════════════════════ */}
           {/* DASHBOARD */}
           {/* ═══════════════════════════════════════════════════════════════ */}
           {activeTab === 'dashboard' && (
-            <DashboardTab bikes={bikes} models={models} rentals={rentals} bookings={bookings} cardCls={cardCls} loadingData={loadingData} currency={currency} />
+            <DashboardTab
+              bikes={bikes}
+              models={models}
+              rentals={rentals}
+              bookings={bookings}
+              rooms={rooms}
+              cardCls={cardCls}
+              loadingData={loadingData}
+              currency={currency}
+              onNavigateTab={setActiveTab}
+              sendCategoryTelegramAlert={sendCategoryTelegramAlert}
+              tgSending={tgSending}
+            />
           )}
 
           {/* ═══════════════════════════════════════════════════════════════ */}
@@ -540,7 +677,27 @@ export default function Admin() {
             loadingData ? (
               <AdminTableSkeleton rows={7} cols={6} />
             ) : (
-              <RoomsTab bookings={bookings} setBookings={setBookings} rooms={rooms} bedCategories={bedCategories} occupancy={occupancy} auth={auth} fetchAll={fetchAll} fetchDash={fetchDash} inputCls={inputCls} labelCls={labelCls} cardCls={cardCls} btnPrimary={btnPrimary} btnSecondary={btnSecondary} btnDanger={btnDanger} statusBadge={statusBadge} today={today} currency={currency} />
+              <RoomsTab
+                bookings={bookings}
+                setBookings={setBookings}
+                rooms={rooms}
+                bedCategories={bedCategories}
+                occupancy={occupancy}
+                auth={auth}
+                fetchAll={fetchAll}
+                fetchDash={fetchDash}
+                inputCls={inputCls}
+                labelCls={labelCls}
+                cardCls={cardCls}
+                btnPrimary={btnPrimary}
+                btnSecondary={btnSecondary}
+                btnDanger={btnDanger}
+                statusBadge={statusBadge}
+                today={today}
+                currency={currency}
+                sendCategoryTelegramAlert={sendCategoryTelegramAlert}
+                tgSending={tgSending}
+              />
             )
           )}
 
@@ -568,18 +725,96 @@ export default function Admin() {
                 statusBadge={statusBadge}
                 today={today}
                 currency={currency}
+                sendCategoryTelegramAlert={sendCategoryTelegramAlert}
+                tgSending={tgSending}
               />
             )
           )}
 
           {/* ═══════════════════════════════════════════════════════════════ */}
-          {/* MOTORBIKE RENTAL */}
+          {/* ONLINE BOOKINGS (from public website) */}
+          {/* ═══════════════════════════════════════════════════════════════ */}
+          {activeTab === 'bookings' && (
+            loadingData ? (
+              <AdminTableSkeleton rows={7} cols={6} />
+            ) : (
+              <BookingsTab
+                bookings={bookings}
+                setBookings={setBookings}
+                auth={auth}
+                fetchAll={fetchAll}
+                inputCls={inputCls}
+                labelCls={labelCls}
+                cardCls={cardCls}
+                btnPrimary={btnPrimary}
+                btnSecondary={btnSecondary}
+                btnDanger={btnDanger}
+                statusBadge={statusBadge}
+                sendCategoryTelegramAlert={sendCategoryTelegramAlert}
+                tgSending={tgSending}
+              />
+            )
+          )}
+
+          {/* ═══════════════════════════════════════════════════════════════ */}
+          {/* GUESTS CRM */}
+          {/* ═══════════════════════════════════════════════════════════════ */}
+          {activeTab === 'guests' && (
+            loadingData ? (
+              <AdminTableSkeleton rows={7} cols={5} />
+            ) : (
+              <GuestsTab
+                guests={guests}
+                auth={auth}
+                fetchAll={fetchAll}
+                inputCls={inputCls}
+                labelCls={labelCls}
+                cardCls={cardCls}
+                btnPrimary={btnPrimary}
+                btnDanger={btnDanger}
+                sendCategoryTelegramAlert={sendCategoryTelegramAlert}
+                tgSending={tgSending}
+              />
+            )
+          )}
+
+          {/* ═══════════════════════════════════════════════════════════════ */}
+          {/* BIKES & FLEET MANAGEMENT */}
+          {/* ═══════════════════════════════════════════════════════════════ */}
+          {activeTab === 'fleet' && (
+            loadingData ? (
+              <AdminTableSkeleton rows={7} cols={6} />
+            ) : (
+              <FleetTab
+                bikes={bikes}
+                models={models}
+                setBikes={setBikes}
+                setModels={setModels}
+                auth={auth}
+                fetchAll={fetchAll}
+                inputCls={inputCls}
+                labelCls={labelCls}
+                cardCls={cardCls}
+                btnPrimary={btnPrimary}
+                btnSecondary={btnSecondary}
+                btnDanger={btnDanger}
+                statusBadge={statusBadge}
+                currency={currency}
+                rooms={rooms}
+                sendCategoryTelegramAlert={sendCategoryTelegramAlert}
+                tgSending={tgSending}
+              />
+            )
+          )}
+
+          {/* ═══════════════════════════════════════════════════════════════ */}
+          {/* RENTALS */}
           {/* ═══════════════════════════════════════════════════════════════ */}
           {activeTab === 'rentals' && (
             loadingData ? (
               <AdminTableSkeleton rows={7} cols={6} />
             ) : (
-              <RentalsTab bikes={bikes} rentals={rentals} occupancy={occupancy} auth={auth} fetchAll={fetchAll} inputCls={inputCls} labelCls={labelCls} cardCls={cardCls} btnPrimary={btnPrimary} btnSecondary={btnSecondary} btnDanger={btnDanger} statusBadge={statusBadge} today={today} currency={currency} />
+              <RentalsTab bikes={bikes} rentals={rentals} occupancy={occupancy} auth={auth} fetchAll={fetchAll} inputCls={inputCls} labelCls={labelCls} cardCls={cardCls} btnPrimary={btnPrimary} btnSecondary={btnSecondary} btnDanger={btnDanger} statusBadge={statusBadge} today={today} currency={currency} sendCategoryTelegramAlert={sendCategoryTelegramAlert} tgSending={tgSending} />
             )
           )}
 
@@ -646,7 +881,7 @@ export default function Admin() {
             loadingData ? (
               <AdminTableSkeleton rows={7} cols={6} />
             ) : (
-              <FleetTab bikes={bikes} models={models} auth={auth} fetchAll={fetchAll} inputCls={inputCls} labelCls={labelCls} cardCls={cardCls} btnPrimary={btnPrimary} btnSecondary={btnSecondary} btnDanger={btnDanger} statusBadge={statusBadge} currency={currency} rooms={rooms} />
+              <FleetTab bikes={bikes} models={models} setBikes={setBikes} setModels={setModels} auth={auth} fetchAll={fetchAll} inputCls={inputCls} labelCls={labelCls} cardCls={cardCls} btnPrimary={btnPrimary} btnSecondary={btnSecondary} btnDanger={btnDanger} statusBadge={statusBadge} currency={currency} rooms={rooms} />
             )
           )}
 
@@ -673,7 +908,9 @@ export default function Admin() {
                     <h3 className="font-bold text-lg text-stone-900"><i className="fa-solid fa-store mr-2 text-brand-500"></i>About Us Section (ព័ត៌មានអំពីយើង)</h3>
                     <p className="text-xs text-stone-500">គ្រប់គ្រងចំណងជើង, អត្ថបទរៀបរាប់, ចំណុចលេចធ្លោ, និងរូបភាពបង្ហាញលើគេហទំព័រ</p>
                   </div>
-                  <button onClick={saveSettings} className={btnPrimary}>{settingsSaved ? '✅ Saved!' : 'Save About Us'}</button>
+                  <button onClick={saveSettings} className={btnPrimary}>
+                    {settingsSaved ? <span className="inline-flex items-center gap-1.5"><i className="fa-solid fa-circle-check"></i> Saved!</span> : 'Save About Us'}
+                  </button>
                 </div>
 
                 <div className="space-y-4 text-sm">
@@ -859,7 +1096,7 @@ export default function Admin() {
                   </div>
 
                   <div className="pt-2">
-                    <button onClick={saveSettings} className={btnPrimary}>{settingsSaved ? '✅ Saved!' : 'Save About Us Changes'}</button>
+                    <button onClick={saveSettings} className={btnPrimary}>{settingsSaved ? <span className="inline-flex items-center gap-1.5"><i className="fa-solid fa-circle-check"></i> Saved!</span> : 'Save About Us Changes'}</button>
                   </div>
                 </div>
               </div>
@@ -882,7 +1119,7 @@ export default function Admin() {
                   ))}
                   <div className="flex gap-3">
                     <button onClick={()=>setSettings({...settings,testimonials:[...(settings.testimonials||[]),{name:'',country:'',text:'',rating:5}]})} className={btnSecondary}>+ Add Review</button>
-                    <button onClick={saveSettings} className={btnPrimary}>{settingsSaved?'✅ Saved!':'Save Reviews'}</button>
+                    <button onClick={saveSettings} className={btnPrimary}>{settingsSaved ? <span className="inline-flex items-center gap-1.5"><i className="fa-solid fa-circle-check"></i> Saved!</span> : 'Save Reviews'}</button>
                   </div>
                 </div>
               </div>
@@ -905,7 +1142,7 @@ export default function Admin() {
                     <div><label className={labelCls}>Map Embed URL</label><input type="text" value={settings.contact_info?.mapEmbed||''} onChange={e=>setSettings({...settings,contact_info:{...settings.contact_info,mapEmbed:e.target.value}})} className={inputCls} /></div>
                   </div>
                   <div><label className={labelCls}>Hours</label><input type="text" value={settings.contact_info?.hours||''} onChange={e=>setSettings({...settings,contact_info:{...settings.contact_info,hours:e.target.value}})} className={inputCls} /></div>
-                  <button onClick={saveSettings} className={btnPrimary}>{settingsSaved?'✅ Saved!':'Save Contact Info'}</button>
+                  <button onClick={saveSettings} className={btnPrimary}>{settingsSaved ? <span className="inline-flex items-center gap-1.5"><i className="fa-solid fa-circle-check"></i> Saved!</span> : 'Save Contact Info'}</button>
                 </div>
               </div>
               {/* Why Us (About Siem Reap Angkor) */}
@@ -943,7 +1180,7 @@ export default function Admin() {
                   ))}
                   <button onClick={()=>setSettings({...settings,why_us:{...settings.why_us,features:[...(settings.why_us?.features||[]),{title:'',icon:'fa-check',desc:'',color:'text-brand bg-orange-50'}]}})} className="text-xs font-bold text-brand-600 block mb-4">+ Add Feature</button>
 
-                  <button onClick={saveSettings} className={btnPrimary}>{settingsSaved?'✅ Saved!':'Save Why Us'}</button>
+                  <button onClick={saveSettings} className={btnPrimary}>{settingsSaved ? <span className="inline-flex items-center gap-1.5"><i className="fa-solid fa-circle-check"></i> Saved!</span> : 'Save Why Us'}</button>
                 </div>
               </div>
 
@@ -960,7 +1197,7 @@ export default function Admin() {
                     </div>
                   ))}
                   <button onClick={()=>setSettings({...settings,services_bar:[...(settings.services_bar||[]),{icon:'fa-check',label:'',desc:''}]})} className="text-xs font-bold text-brand-600 block mb-4">+ Add Service</button>
-                  <button onClick={saveSettings} className={btnPrimary}>{settingsSaved?'✅ Saved!':'Save Services Bar'}</button>
+                  <button onClick={saveSettings} className={btnPrimary}>{settingsSaved ? <span className="inline-flex items-center gap-1.5"><i className="fa-solid fa-circle-check"></i> Saved!</span> : 'Save Services Bar'}</button>
                 </div>
               </div>
 
@@ -978,7 +1215,7 @@ export default function Admin() {
                     </div>
                   ))}
                 </div>
-                <button onClick={saveSettings} className={btnPrimary}>{settingsSaved?'✅ Saved!':'Save Images'}</button>
+                <button onClick={saveSettings} className={btnPrimary}>{settingsSaved ? <span className="inline-flex items-center gap-1.5"><i className="fa-solid fa-circle-check"></i> Saved!</span> : 'Save Images'}</button>
               </div>
             </div>
           )}
@@ -1011,6 +1248,12 @@ export default function Admin() {
               btnDanger={btnDanger}
               statusBadge={statusBadge}
               currency={currency}
+              rentals={rentals}
+              bookings={bookings}
+              invoices={invoices}
+              bikes={bikes}
+              rooms={rooms}
+              guests={guests}
             />
           )}
           
@@ -1069,10 +1312,14 @@ export default function Admin() {
           {activeTab === 'history' && (
             <HistoryTab
               rentals={rentals}
+              setRentals={setRentals}
+              bikes={bikes}
               auth={auth}
               fetchAll={fetchAll}
               inputCls={inputCls}
+              labelCls={labelCls}
               cardCls={cardCls}
+              btnPrimary={btnPrimary}
               btnSecondary={btnSecondary}
               btnDanger={btnDanger}
               statusBadge={statusBadge}
@@ -1084,18 +1331,28 @@ export default function Admin() {
             <CalendarTab
               rentals={rentals}
               bookings={bookings}
+              bikes={bikes}
+              models={models}
+              rooms={rooms}
               cardCls={cardCls}
               btnSecondary={btnSecondary}
+              currency={currency}
             />
           )}
 
           {activeTab === 'income' && (
             <IncomeTab
               rentals={rentals}
+              setRentals={setRentals}
               bikes={bikes}
+              auth={auth}
+              fetchAll={fetchAll}
               cardCls={cardCls}
               inputCls={inputCls}
+              labelCls={labelCls}
+              btnPrimary={btnPrimary}
               btnSecondary={btnSecondary}
+              btnDanger={btnDanger}
               currency={currency}
             />
           )}
@@ -1103,9 +1360,15 @@ export default function Admin() {
           {activeTab === 'booking-income' && (
             <BookingIncomeTab
               bookings={bookings}
+              setBookings={setBookings}
+              auth={auth}
+              fetchAll={fetchAll}
               cardCls={cardCls}
               inputCls={inputCls}
+              labelCls={labelCls}
+              btnPrimary={btnPrimary}
               btnSecondary={btnSecondary}
+              btnDanger={btnDanger}
               currency={currency}
             />
           )}
@@ -1170,13 +1433,18 @@ export default function Admin() {
           {activeTab === 'room-history' && (
             <RoomHistoryTab
               occupancy={occupancy}
+              setOccupancy={setOccupancy}
               bookings={bookings}
+              setBookings={setBookings}
               rooms={rooms}
               auth={auth}
               fetchAll={fetchAll}
               cardCls={cardCls}
               inputCls={inputCls}
+              labelCls={labelCls}
+              btnPrimary={btnPrimary}
               btnSecondary={btnSecondary}
+              btnDanger={btnDanger}
               currency={currency}
             />
           )}
@@ -1184,10 +1452,16 @@ export default function Admin() {
           {activeTab === 'room-income' && (
             <RoomIncomeTab
               occupancy={occupancy}
+              setOccupancy={setOccupancy}
               rooms={rooms}
+              auth={auth}
+              fetchAll={fetchAll}
               cardCls={cardCls}
               inputCls={inputCls}
+              labelCls={labelCls}
+              btnPrimary={btnPrimary}
               btnSecondary={btnSecondary}
+              btnDanger={btnDanger}
               currency={currency}
             />
           )}
@@ -1582,10 +1856,11 @@ function HousekeepingTab({ rooms, housekeeping, maintenance, bikes, auth, fetchA
 //  ONLINE BOOKINGS TAB (Fast Optimistic CRUD & Status Management)
 // ══════════════════════════════════════════════════════════════════════════════
 
-function BookingsTab({ bookings, setBookings, auth, fetchAll, inputCls, labelCls, cardCls, btnPrimary, btnSecondary, btnDanger, statusBadge }) {
+function BookingsTab({ bookings, setBookings, auth, fetchAll, inputCls, labelCls, cardCls, btnPrimary, btnSecondary, btnDanger, statusBadge, sendCategoryTelegramAlert, tgSending }) {
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('all'); // all | motor | room
   const [statusFilter, setStatusFilter] = useState('all'); // all | pending | confirmed | cancelled
+  const [sortBy, setSortBy] = useState('date-desc');
   const [editingBooking, setEditingBooking] = useState(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -1604,10 +1879,15 @@ function BookingsTab({ bookings, setBookings, auth, fetchAll, inputCls, labelCls
   };
 
   // Fast optimistic delete (0ms latency)
-  const handleDelete = async (id) => {
+  const handleDelete = async (bookingOrId) => {
+    const id = typeof bookingOrId === 'object' ? bookingOrId.id : bookingOrId;
+    const bRef = typeof bookingOrId === 'object' ? bookingOrId.bookingRef : null;
     if (!await showConfirm('Delete Booking', 'Are you sure you want to delete this booking?', 'Delete', 'danger')) return;
     setBookings(prev => prev.filter(b => b.id !== id));
-    fetch(`/api/bookings/${id}`, { method: 'DELETE', ...auth })
+    BookingService.delete(id).catch(() => {});
+    HotelBookingService.delete(id).catch(() => {});
+    const targetId = bRef || id;
+    fetch(`/api/bookings/${targetId}`, { method: 'DELETE', ...auth })
       .catch(err => {
         console.error('Delete failed:', err);
         fetchAll();
@@ -1618,10 +1898,18 @@ function BookingsTab({ bookings, setBookings, auth, fetchAll, inputCls, labelCls
   const handleSaveEdit = (e) => {
     e.preventDefault();
     if (!editingBooking) return;
-    const updated = { ...editingBooking };
+    const updated = {
+      ...editingBooking,
+      totalFee: Number(editingBooking.totalFee || editingBooking.totalPrice || 0),
+      totalPrice: Number(editingBooking.totalFee || editingBooking.totalPrice || 0),
+      deposit: Number(editingBooking.deposit || 0)
+    };
     setBookings(prev => prev.map(b => b.id === updated.id ? updated : b));
     setEditingBooking(null);
-    fetch(`/api/bookings/${updated.id}`, {
+    BookingService.update(updated.id, updated).catch(() => {});
+    HotelBookingService.update(updated.id, updated).catch(() => {});
+    const targetId = updated.bookingRef || updated.id;
+    fetch(`/api/bookings/${targetId}`, {
       method: 'PUT',
       ...auth,
       body: JSON.stringify(updated)
@@ -1633,7 +1921,7 @@ function BookingsTab({ bookings, setBookings, auth, fetchAll, inputCls, labelCls
 
   const filtered = useMemo(() => {
     const q = (search || '').toLowerCase().trim();
-    return (bookings || []).filter(b => {
+    const list = (bookings || []).filter(b => {
       const name = String(b.customerName || '').toLowerCase();
       const phone = String(b.phone || b.customerPhone || '');
       const item = String(b.itemName || '').toLowerCase();
@@ -1643,7 +1931,35 @@ function BookingsTab({ bookings, setBookings, auth, fetchAll, inputCls, labelCls
       const matchStatus = statusFilter === 'all' || bStatus === statusFilter;
       return matchSearch && matchType && matchStatus;
     });
-  }, [bookings, search, typeFilter, statusFilter]);
+
+    list.sort((a, b) => {
+      if (sortBy === 'date-desc') {
+        const da = new Date(a.startDate || a.checkoutDate || a.createdAt || 0).getTime();
+        const db = new Date(b.startDate || b.checkoutDate || b.createdAt || 0).getTime();
+        return db - da;
+      }
+      if (sortBy === 'date-asc') {
+        const da = new Date(a.startDate || a.checkoutDate || a.createdAt || 0).getTime();
+        const db = new Date(b.startDate || b.checkoutDate || b.createdAt || 0).getTime();
+        return da - db;
+      }
+      if (sortBy === 'name-asc') {
+        return String(a.customerName || '').trim().localeCompare(String(b.customerName || '').trim(), 'km');
+      }
+      if (sortBy === 'name-desc') {
+        return String(b.customerName || '').trim().localeCompare(String(a.customerName || '').trim(), 'km');
+      }
+      if (sortBy === 'price-desc') {
+        return (Number(b.totalFee || b.totalPrice || 0)) - (Number(a.totalFee || a.totalPrice || 0));
+      }
+      if (sortBy === 'price-asc') {
+        return (Number(a.totalFee || a.totalPrice || 0)) - (Number(b.totalFee || b.totalPrice || 0));
+      }
+      return 0;
+    });
+
+    return list;
+  }, [bookings, search, typeFilter, statusFilter, sortBy]);
 
   const paginated = useMemo(() => {
     const start = (page - 1) * pageSize;
@@ -1712,24 +2028,51 @@ function BookingsTab({ bookings, setBookings, auth, fetchAll, inputCls, labelCls
           <input
             type="text"
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={e => { setSearch(e.target.value); setPage(1); }}
             placeholder="Search by customer name, phone, item..."
             className={inputCls}
           />
         </div>
 
         <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-start md:justify-end">
+          {/* Sort Dropdown */}
+          <select
+            value={sortBy}
+            onChange={e => setSortBy(e.target.value)}
+            className="bg-stone-50 border border-stone-200 rounded-xl px-3 py-1.5 text-xs font-bold text-stone-700 outline-none focus:border-brand-500 cursor-pointer shadow-2xs"
+            title="តម្រៀប (Sort)"
+          >
+            <option value="date-desc">កាលបរិច្ឆេទ: ថ្មីមុន (Newest)</option>
+            <option value="date-asc">កាលបរិច្ឆេទ: ចាស់មុន (Oldest)</option>
+            <option value="name-asc">ឈ្មោះ: A ដល់ Z (Name: A - Z)</option>
+            <option value="name-desc">ឈ្មោះ: Z ដល់ A (Name: Z - A)</option>
+            <option value="price-desc">តម្លៃ: ខ្ពស់ទៅទាប (Price: High)</option>
+            <option value="price-asc">តម្លៃ: ទាបទៅខ្ពស់ (Price: Low)</option>
+          </select>
+
           {/* Type Filter */}
           <div className="flex bg-stone-100 p-1 rounded-xl text-xs font-bold text-stone-600">
             {['all', 'motor', 'room'].map(t => (
               <button
                 key={t}
-                onClick={() => setTypeFilter(t)}
-                className={`px-3 py-1.5 rounded-lg capitalize transition-all ${
+                onClick={() => { setTypeFilter(t); setPage(1); }}
+                className={`px-3 py-1.5 rounded-lg capitalize transition-all flex items-center gap-1.5 ${
                   typeFilter === t ? 'bg-white text-stone-900 shadow-sm' : 'hover:text-stone-900'
                 }`}
               >
-                {t === 'motor' ? '🛵 Motors' : t === 'room' ? '🏨 Rooms' : 'All Types'}
+                {t === 'motor' ? (
+                  <>
+                    <i className="fa-solid fa-motorcycle text-brand-500"></i>
+                    <span>Motors</span>
+                  </>
+                ) : t === 'room' ? (
+                  <>
+                    <i className="fa-solid fa-door-open text-indigo-500"></i>
+                    <span>Rooms</span>
+                  </>
+                ) : (
+                  <span>All Types</span>
+                )}
               </button>
             ))}
           </div>
@@ -1739,7 +2082,7 @@ function BookingsTab({ bookings, setBookings, auth, fetchAll, inputCls, labelCls
             {['all', 'pending', 'confirmed', 'cancelled'].map(s => (
               <button
                 key={s}
-                onClick={() => setStatusFilter(s)}
+                onClick={() => { setStatusFilter(s); setPage(1); }}
                 className={`px-3 py-1.5 rounded-lg capitalize transition-all ${
                   statusFilter === s ? 'bg-white text-stone-900 shadow-sm' : 'hover:text-stone-900'
                 }`}
@@ -1748,7 +2091,42 @@ function BookingsTab({ bookings, setBookings, auth, fetchAll, inputCls, labelCls
               </button>
             ))}
           </div>
+
+          {/* Print & Alert to Telegram */}
+          <div className="flex items-center gap-1.5 ml-auto">
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="px-3 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
+              title="បោះពុម្ពបញ្ជីការកក់ (Print Bookings)"
+            >
+              <i className="fa-solid fa-print text-stone-600"></i>
+              <span>Print</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => sendCategoryTelegramAlert && sendCategoryTelegramAlert({
+                category: 'Bookings',
+                title: 'Bookings & Reservations Status',
+                summary: `Total Bookings: ${filtered.length} (Motors: ${bookings.filter(b=>b.type==='motor').length}, Rooms: ${bookings.filter(b=>b.type==='room'||b.roomId).length})`,
+                details: `Pending: ${pendingCount} | Confirmed: ${confirmedCount} | Cancelled: ${cancelledCount}`
+              })}
+              disabled={tgSending}
+              className="px-3 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-2xs disabled:opacity-50 cursor-pointer"
+              title="ផ្ញើបញ្ជីការកក់ទៅ Telegram"
+            >
+              <i className="fa-brands fa-telegram text-sky-500"></i>
+              <span>Alert Telegram</span>
+            </button>
+          </div>
         </div>
+      </div>
+
+      {/* Printable Report Header */}
+      <div className="print-only mb-4 p-4 border-b border-stone-300">
+        <h2 className="text-xl font-bold">Motorental Siemreab Angkor & Guesthouse</h2>
+        <p className="text-sm text-stone-700 font-semibold">Online Bookings & Customer Reservations Manifest</p>
+        <p className="text-xs text-stone-500">Total Bookings: {filtered.length} | Printed: {new Date().toLocaleString()}</p>
       </div>
 
       {/* Bookings Table */}
@@ -1761,11 +2139,34 @@ function BookingsTab({ bookings, setBookings, auth, fetchAll, inputCls, labelCls
 
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left">
-            <thead className="bg-stone-50 border-b border-stone-100 text-xs text-stone-500 uppercase tracking-wider">
+            <thead className="bg-stone-50 border-b border-stone-100 text-xs text-stone-500 uppercase tracking-wider select-none">
               <tr>
-                {['Status', 'Type & Item', 'Customer', 'Contact', 'Dates / Duration', 'Guests / Beds', 'Requests', 'Quick Actions'].map(h => (
-                  <th key={h} className="px-4 py-3 font-bold">{h}</th>
-                ))}
+                <th className="px-4 py-3 font-bold">Status</th>
+                <th className="px-4 py-3 font-bold">Type & Item</th>
+                <th
+                  onClick={() => setSortBy(prev => prev === 'name-asc' ? 'name-desc' : 'name-asc')}
+                  className="px-4 py-3 font-bold cursor-pointer hover:text-stone-900 transition"
+                  title="Click to sort by customer name"
+                >
+                  <div className="flex items-center gap-1">
+                    <span>Customer</span>
+                    <i className={`fa-solid fa-sort text-[10px] ${sortBy.startsWith('name') ? 'text-brand-600' : 'text-stone-300'}`}></i>
+                  </div>
+                </th>
+                <th className="px-4 py-3 font-bold">Contact</th>
+                <th
+                  onClick={() => setSortBy(prev => prev === 'date-desc' ? 'date-asc' : 'date-desc')}
+                  className="px-4 py-3 font-bold cursor-pointer hover:text-stone-900 transition"
+                  title="Click to sort by date"
+                >
+                  <div className="flex items-center gap-1">
+                    <span>Dates / Duration</span>
+                    <i className={`fa-solid fa-sort text-[10px] ${sortBy.startsWith('date') ? 'text-brand-600' : 'text-stone-300'}`}></i>
+                  </div>
+                </th>
+                <th className="px-4 py-3 font-bold">Guests / Beds</th>
+                <th className="px-4 py-3 font-bold">Requests</th>
+                <th className="px-4 py-3 font-bold">Quick Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -1783,10 +2184,11 @@ function BookingsTab({ bookings, setBookings, auth, fetchAll, inputCls, labelCls
                     {/* Item */}
                     <td className="px-4 py-3.5">
                       <div className="flex items-center gap-2">
-                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${
                           b.type === 'motor' ? 'bg-brand-50 text-brand-700' : 'bg-indigo-50 text-indigo-700'
                         }`}>
-                          {b.type === 'motor' ? '🛵 Motor' : '🏨 Room'}
+                          <i className={`fa-solid ${b.type === 'motor' ? 'fa-motorcycle' : 'fa-door-open'} text-[10px]`}></i>
+                          {b.type === 'motor' ? 'Motor' : 'Room'}
                         </span>
                         <span className="font-bold text-stone-900">{b.itemName}</span>
                       </div>
@@ -1852,7 +2254,7 @@ function BookingsTab({ bookings, setBookings, auth, fetchAll, inputCls, labelCls
                         </button>
 
                         <button
-                          onClick={() => handleDelete(b.id)}
+                          onClick={() => handleDelete(b)}
                           title="Delete Booking"
                           className="w-8 h-8 flex items-center justify-center text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
                         >
@@ -1889,7 +2291,7 @@ function BookingsTab({ bookings, setBookings, auth, fetchAll, inputCls, labelCls
       {/* ───────────────────────────────────────────────────────────────────── */}
       {editingBooking && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl border border-stone-200 anim-scale-in">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl border border-stone-200 modal-pop">
             <div className="flex items-center justify-between mb-6 pb-3 border-b border-stone-100">
               <h3 className="font-bold text-lg text-stone-900 flex items-center gap-2">
                 <i className="fa-solid fa-pen-to-square text-brand-500"></i> Edit Booking #{editingBooking.id}
@@ -1935,8 +2337,8 @@ function BookingsTab({ bookings, setBookings, auth, fetchAll, inputCls, labelCls
                     onChange={e => setEditingBooking({ ...editingBooking, type: e.target.value })}
                     className={inputCls}
                   >
-                    <option value="motor">Motorbike Rental 🛵</option>
-                    <option value="room">Guesthouse Room 🏨</option>
+                    <option value="motor">Motorbike Rental</option>
+                    <option value="room">Guesthouse Room</option>
                   </select>
                 </div>
                 <div>
@@ -2014,6 +2416,29 @@ function BookingsTab({ bookings, setBookings, auth, fetchAll, inputCls, labelCls
                 )}
               </div>
 
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className={labelCls}>Total Price / Fee ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editingBooking.totalFee ?? editingBooking.totalPrice ?? ''}
+                    onChange={e => setEditingBooking({ ...editingBooking, totalFee: parseFloat(e.target.value) || 0, totalPrice: parseFloat(e.target.value) || 0 })}
+                    className={inputCls}
+                  />
+                </div>
+                <div>
+                  <label className={labelCls}>Deposit ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editingBooking.deposit ?? ''}
+                    onChange={e => setEditingBooking({ ...editingBooking, deposit: parseFloat(e.target.value) || 0 })}
+                    className={inputCls}
+                  />
+                </div>
+              </div>
+
               <div>
                 <label className={labelCls}>Special Requests / Notes</label>
                 <textarea
@@ -2041,9 +2466,10 @@ function BookingsTab({ bookings, setBookings, auth, fetchAll, inputCls, labelCls
   );
 }
 
-function GuestsTab({ guests, auth, fetchAll, inputCls, labelCls, cardCls, btnPrimary, btnDanger }) {
+function GuestsTab({ guests, auth, fetchAll, inputCls, labelCls, cardCls, btnPrimary, btnDanger, sendCategoryTelegramAlert, tgSending }) {
   const [form, setForm] = useState({ name:'', phone:'', email:'', nationality:'', passportId:'', notes:'' });
   const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState('name-asc');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
@@ -2058,7 +2484,33 @@ function GuestsTab({ guests, auth, fetchAll, inputCls, labelCls, cardCls, btnPri
     fetchAll();
   };
 
-  const filtered = (guests || []).filter(g => !search || (g.name || '').toLowerCase().includes(search.toLowerCase()) || g.phone?.includes(search) || (g.nationality || '').toLowerCase().includes(search.toLowerCase()));
+  const filtered = useMemo(() => {
+    const list = (guests || []).filter(g =>
+      !search ||
+      (g.name || '').toLowerCase().includes(search.toLowerCase()) ||
+      g.phone?.includes(search) ||
+      (g.nationality || '').toLowerCase().includes(search.toLowerCase()) ||
+      (g.passportId || g.passportOrId || '').toLowerCase().includes(search.toLowerCase())
+    );
+
+    list.sort((a, b) => {
+      if (sortBy === 'name-asc') {
+        return (a.name || '').trim().localeCompare((b.name || '').trim(), 'km');
+      }
+      if (sortBy === 'name-desc') {
+        return (b.name || '').trim().localeCompare((a.name || '').trim(), 'km');
+      }
+      if (sortBy === 'id-desc') {
+        return String(b.id || '').localeCompare(String(a.id || ''));
+      }
+      if (sortBy === 'id-asc') {
+        return String(a.id || '').localeCompare(String(b.id || ''));
+      }
+      return 0;
+    });
+
+    return list;
+  }, [guests, search, sortBy]);
 
   const paginated = useMemo(() => {
     const start = (page - 1) * pageSize;
@@ -2081,14 +2533,78 @@ function GuestsTab({ guests, auth, fetchAll, inputCls, labelCls, cardCls, btnPri
           </form>
         </div>
         <div className="xl:col-span-2">
-          <div className="mb-4">
-            <input type="text" value={search} onChange={e=>setSearch(e.target.value)} className={inputCls} placeholder="Search by name, phone, nationality..." />
+          <div className="mb-4 flex flex-col sm:flex-row items-center gap-3">
+            <div className="relative flex-1 w-full">
+              <input type="text" value={search} onChange={e=>{ setSearch(e.target.value); setPage(1); }} className={inputCls} placeholder="Search by name, phone, nationality, ID..." />
+            </div>
+            <select
+              value={sortBy}
+              onChange={e => setSortBy(e.target.value)}
+              className="bg-stone-50 border border-stone-200 rounded-lg px-3 py-2 text-xs font-bold text-stone-700 outline-none focus:border-brand-500 shrink-0 cursor-pointer shadow-2xs"
+              title="តម្រៀប (Sort)"
+            >
+              <option value="name-asc">ឈ្មោះ: A ដល់ Z (Name: A - Z)</option>
+              <option value="name-desc">ឈ្មោះ: Z ដល់ A (Name: Z - A)</option>
+              <option value="id-desc">ID: ថ្មីមុន (Newest ID)</option>
+              <option value="id-asc">ID: ចាស់មុន (Oldest ID)</option>
+            </select>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="px-3 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                title="បោះពុម្ពបញ្ជីភ្ញៀវ (Print Guests)"
+              >
+                <i className="fa-solid fa-print text-stone-600"></i>
+                <span>Print</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => sendCategoryTelegramAlert && sendCategoryTelegramAlert({
+                  category: 'Guests',
+                  title: 'Guest CRM Directory Report',
+                  summary: `Total Registered Guests: ${guests.length}. Filtered: ${filtered.length}.`,
+                  details: `Latest guest contacts and stay records synchronized.`
+                })}
+                disabled={tgSending}
+                className="px-3 py-2 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 text-xs font-bold rounded-lg transition flex items-center gap-1.5 shadow-2xs disabled:opacity-50 cursor-pointer"
+                title="ផ្ញើបញ្ជីភ្ញៀវទៅ Telegram"
+              >
+                <i className="fa-brands fa-telegram text-sky-500"></i>
+                <span>Alert Telegram</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Printable Report Header */}
+          <div className="print-only mb-4 p-4 border-b border-stone-300">
+            <h2 className="text-xl font-bold">Motorental Siemreab Angkor & Guesthouse</h2>
+            <p className="text-sm text-stone-700 font-semibold">Guest Directory & Customer Profiles</p>
+            <p className="text-xs text-stone-500">Total Registered: {guests.length} | Printed: {new Date().toLocaleString()}</p>
           </div>
           <div className={`${cardCls} overflow-hidden`}>
             <div className="overflow-x-auto">
               <table className="w-full text-sm text-left">
-                <thead className="bg-stone-50 border-b border-stone-100 text-xs text-stone-500 uppercase tracking-wider">
-                  <tr>{['Name','Phone','Email','Nationality','Passport ID','Notes','Actions'].map(h=><th key={h} className="px-4 py-3 font-bold">{h}</th>)}</tr>
+                <thead className="bg-stone-50 border-b border-stone-100 text-xs text-stone-500 uppercase tracking-wider select-none">
+                  <tr>
+                    <th
+                      onClick={() => setSortBy(prev => prev === 'name-asc' ? 'name-desc' : 'name-asc')}
+                      className="px-4 py-3 font-bold cursor-pointer hover:text-stone-900 transition"
+                      title="Click to sort by name"
+                    >
+                      <div className="flex items-center gap-1">
+                        <span>Name</span>
+                        <i className={`fa-solid fa-sort text-[10px] ${sortBy.startsWith('name') ? 'text-brand-600' : 'text-stone-300'}`}></i>
+                      </div>
+                    </th>
+                    <th className="px-4 py-3 font-bold">Phone</th>
+                    <th className="px-4 py-3 font-bold">Email</th>
+                    <th className="px-4 py-3 font-bold">Nationality</th>
+                    <th className="px-4 py-3 font-bold">Passport ID</th>
+                    <th className="px-4 py-3 font-bold">Notes</th>
+                    <th className="px-4 py-3 font-bold">Actions</th>
+                  </tr>
                 </thead>
                 <tbody>
                   {paginated.map(g=>(
@@ -2121,7 +2637,8 @@ function GuestsTab({ guests, auth, fetchAll, inputCls, labelCls, cardCls, btnPri
   );
 }
 
-function FleetTab({ bikes, models, auth, fetchAll, inputCls, labelCls, cardCls, btnPrimary, btnSecondary, btnDanger, statusBadge, currency }) {
+function FleetTab({ bikes, models, setBikes, setModels, auth, fetchAll, inputCls, labelCls, cardCls, btnPrimary, btnSecondary, btnDanger, statusBadge, currency, sendCategoryTelegramAlert, tgSending }) {
+  const { showModal, showConfirm } = useModal();
   const [activeSubTab, setActiveSubTab] = useState('models');
   const [search, setSearch] = useState('');
   
@@ -2132,8 +2649,8 @@ function FleetTab({ bikes, models, auth, fetchAll, inputCls, labelCls, cardCls, 
   const [editingBike, setEditingBike] = useState(null);
   
   // Forms state
-  const [modelForm, setModelForm] = useState({ name: '', description: '', price: '' });
-  const [bikeForm, setBikeForm] = useState({ modelId: '', plateNumber: '', color: '', chassisNumber: '', status: 'Available', imageUrl: '' });
+  const [modelForm, setModelForm] = useState({ brand: '', name: '', dailyPrice: '', price: '' });
+  const [bikeForm, setBikeForm] = useState({ modelId: '', plateNumber: '', color: '', chassisNumber: '', status: 'available', imageUrl: '' });
 
   const handleImageUpload = async (e, setter, current) => {
     const file = e.target.files[0];
@@ -2146,60 +2663,170 @@ function FleetTab({ bikes, models, auth, fetchAll, inputCls, labelCls, cardCls, 
   const handleModelSubmit = async (e) => {
     e.preventDefault();
     try {
+      const dailyPrice = Number(modelForm.dailyPrice || modelForm.price) || 0;
+      const brand = (modelForm.brand || '').trim();
+      const rawName = (modelForm.name || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+      const name = rawName || (brand ? '' : 'Motor Model');
+      const fullName = brand ? (name ? `${brand} ${name}` : brand) : name;
+      const payload = {
+        brand,
+        name,
+        fullName,
+        description: brand,
+        dailyPrice,
+        price: dailyPrice
+      };
+
       if (editingModel) {
-        await BikeModelService.update(editingModel.id, modelForm);
+        await BikeModelService.update(editingModel.id, payload);
+        if (setModels) {
+          setModels(prev => prev.map(m => String(m.id) === String(editingModel.id) ? { ...m, ...payload } : m));
+        }
       } else {
-        await BikeModelService.create(modelForm);
+        const created = await BikeModelService.create(payload);
+        if (setModels) {
+          setModels(prev => [...prev, created]);
+        }
       }
-      setModelModalOpen(false); setEditingModel(null);
+      setModelModalOpen(false);
+      setEditingModel(null);
       fetchAll();
-    } catch(err) { showModal('error', 'Error', err.message); }
+    } catch(err) {
+      showModal('error', 'Error', err.message);
+    }
   };
 
   const handleBikeSubmit = async (e) => {
     e.preventDefault();
     try {
+      const selectedModel = models.find(m => String(m.id) === String(bikeForm.modelId));
+      const modelFullName = selectedModel ? (selectedModel.fullName || `${selectedModel.brand ? selectedModel.brand + ' ' : ''}${selectedModel.name || ''}`.trim()) : '';
+      const dailyPrice = Number(selectedModel?.dailyPrice || selectedModel?.price || 15);
+      const status = (bikeForm.status || 'available').toLowerCase();
+      const payload = {
+        modelId: bikeForm.modelId,
+        plateNumber: (bikeForm.plateNumber || '').trim(),
+        color: (bikeForm.color || 'Standard').trim(),
+        chassisNumber: (bikeForm.chassisNumber || '').trim(),
+        frameNumber: (bikeForm.chassisNumber || '').trim(),
+        status,
+        imageUrl: bikeForm.imageUrl || '',
+        photoUrl: bikeForm.imageUrl || '',
+        name: modelFullName || 'Motor',
+        modelName: modelFullName || 'Motor',
+        price: dailyPrice,
+        dailyPrice
+      };
+
       if (editingBike) {
-        await MotoService.update(editingBike.id, bikeForm);
+        await MotoService.update(editingBike.id, payload);
+        if (setBikes) {
+          setBikes(prev => prev.map(b => String(b.id) === String(editingBike.id) ? { ...b, ...payload } : b));
+        }
       } else {
-        await MotoService.create(bikeForm);
+        const created = await MotoService.create(payload);
+        if (setBikes) {
+          setBikes(prev => [...prev, created]);
+        }
       }
-      setBikeModalOpen(false); setEditingBike(null);
+      setBikeModalOpen(false);
+      setEditingBike(null);
       fetchAll();
-    } catch(err) { showModal('error', 'Error', err.message); }
+    } catch(err) {
+      showModal('error', 'Error', err.message);
+    }
   };
 
   const deleteModel = async (id) => {
     if(!await showConfirm('Delete Model', 'Are you sure you want to delete this bike model?', 'Delete', 'danger')) return;
-    await BikeModelService.delete(id); fetchAll();
+    await BikeModelService.delete(id);
+    if (setModels) setModels(prev => prev.filter(m => String(m.id) !== String(id)));
+    fetchAll();
   };
+
   const deleteBike = async (id) => {
     if(!await showConfirm('Delete Bike', 'Are you sure you want to delete this bike?', 'Delete', 'danger')) return;
-    await MotoService.delete(id); fetchAll();
+    await MotoService.delete(id);
+    if (setBikes) setBikes(prev => prev.filter(b => String(b.id) !== String(id)));
+    fetchAll();
   };
 
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [sortModelsBy, setSortModelsBy] = useState('name-asc');
+  const [sortBikesBy, setSortBikesBy] = useState('name-asc');
+  const [bikeStatusFilter, setBikeStatusFilter] = useState('all');
 
   const filteredModels = useMemo(() => {
     const q = (search || '').toLowerCase().trim();
-    return (models || []).filter(m => {
+    const list = (models || []).filter(m => {
       const name = String(m?.name || '').toLowerCase();
       const brand = String(m?.brand || m?.description || '').toLowerCase();
-      return !q || name.includes(q) || brand.includes(q);
+      const full = `${brand} ${name}`.trim();
+      return !q || name.includes(q) || brand.includes(q) || full.includes(q);
     });
-  }, [models, search]);
+
+    list.sort((a, b) => {
+      if (sortModelsBy === 'name-asc') {
+        const na = `${a.brand || ''} ${a.name || ''}`.trim();
+        const nb = `${b.brand || ''} ${b.name || ''}`.trim();
+        return na.localeCompare(nb, 'km');
+      }
+      if (sortModelsBy === 'name-desc') {
+        const na = `${a.brand || ''} ${a.name || ''}`.trim();
+        const nb = `${b.brand || ''} ${b.name || ''}`.trim();
+        return nb.localeCompare(na, 'km');
+      }
+      if (sortModelsBy === 'price-asc') {
+        return (Number(a.dailyPrice || a.price || 0)) - (Number(b.dailyPrice || b.price || 0));
+      }
+      if (sortModelsBy === 'price-desc') {
+        return (Number(b.dailyPrice || b.price || 0)) - (Number(a.dailyPrice || a.price || 0));
+      }
+      if (sortModelsBy === 'count-desc') {
+        const countA = bikes.filter(x => String(x.modelId) === String(a.id) || x.name === a.name).length;
+        const countB = bikes.filter(x => String(x.modelId) === String(b.id) || x.name === b.name).length;
+        return countB - countA;
+      }
+      return 0;
+    });
+
+    return list;
+  }, [models, search, sortModelsBy, bikes]);
 
   const filteredBikes = useMemo(() => {
     const q = (search || '').toLowerCase().trim();
-    return (bikes || []).filter(b => {
+    const list = (bikes || []).filter(b => {
       const name = String(b?.name || '').toLowerCase();
       const plate = String(b?.plateNumber || '').toLowerCase();
       const color = String(b?.color || '').toLowerCase();
       const status = String(b?.status || '').toLowerCase();
-      return !q || name.includes(q) || plate.includes(q) || color.includes(q) || status.includes(q);
+      const matchSearch = !q || name.includes(q) || plate.includes(q) || color.includes(q) || status.includes(q);
+      const matchStatus = bikeStatusFilter === 'all' || status === bikeStatusFilter.toLowerCase();
+      return matchSearch && matchStatus;
     });
-  }, [bikes, search]);
+
+    list.sort((a, b) => {
+      if (sortBikesBy === 'name-asc') {
+        return String(a.name || '').localeCompare(String(b.name || ''), 'km');
+      }
+      if (sortBikesBy === 'name-desc') {
+        return String(b.name || '').localeCompare(String(a.name || ''), 'km');
+      }
+      if (sortBikesBy === 'plate-asc') {
+        return String(a.plateNumber || '').localeCompare(String(b.plateNumber || ''));
+      }
+      if (sortBikesBy === 'plate-desc') {
+        return String(b.plateNumber || '').localeCompare(String(a.plateNumber || ''));
+      }
+      if (sortBikesBy === 'status') {
+        return String(a.status || '').localeCompare(String(b.status || ''));
+      }
+      return 0;
+    });
+
+    return list;
+  }, [bikes, search, sortBikesBy, bikeStatusFilter]);
 
   const paginatedModels = useMemo(() => {
     const start = (page - 1) * pageSize;
@@ -2231,15 +2858,22 @@ function FleetTab({ bikes, models, auth, fetchAll, inputCls, labelCls, cardCls, 
         </div>
         <div className="flex items-center gap-3">
           <button onClick={()=>{
-            if(activeSubTab==='models') { setEditingModel(null); setModelForm({name:'', description:'', price:''}); setModelModalOpen(true); }
-            else { setEditingBike(null); setBikeForm({modelId:'', plateNumber:'', color:'', chassisNumber:'', status:'Available', imageUrl:''}); setBikeModalOpen(true); }
+            if(activeSubTab==='models') {
+              setEditingModel(null);
+              setModelForm({ brand: '', name: '', dailyPrice: '', price: '' });
+              setModelModalOpen(true);
+            } else {
+              setEditingBike(null);
+              setBikeForm({ modelId: '', plateNumber: '', color: '', chassisNumber: '', status: 'available', imageUrl: '' });
+              setBikeModalOpen(true);
+            }
           }} className={`${btnPrimary} flex items-center gap-1.5`}>
             <i className="fa-solid fa-plus"></i> បន្ថែម {activeSubTab==='models'?'ម៉ូឌែល':'ម៉ូតូ'}
           </button>
         </div>
       </div>
 
-      {/* Filters */}
+      {/* Filters & Sorting Toolbar */}
       <div className={`${cardCls} p-4 flex flex-col sm:flex-row items-center justify-between gap-3`}>
         <div className="w-full sm:w-72 relative">
           <i className="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400 text-xs"></i>
@@ -2251,72 +2885,252 @@ function FleetTab({ bikes, models, auth, fetchAll, inputCls, labelCls, cardCls, 
             className="w-full bg-stone-50 border border-stone-200 rounded-xl pl-9 pr-4 py-2 text-sm text-stone-900 placeholder-stone-400 outline-none focus:border-brand-500"
           />
         </div>
+
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          {activeSubTab === 'bikes' && (
+            <select
+              value={bikeStatusFilter}
+              onChange={e => { setBikeStatusFilter(e.target.value); setPage(1); }}
+              className="bg-stone-50 border border-stone-200 rounded-xl px-3 py-2 text-xs font-semibold text-stone-700 outline-none focus:border-brand-500"
+              title="ស្ថានភាព (Status filter)"
+            >
+              <option value="all">ស្ថានភាពទាំងអស់ (All Statuses)</option>
+              <option value="available">ទំនេរ (Available)</option>
+              <option value="rented">កំពុងជួល (Rented)</option>
+              <option value="maintenance">ជួសជុល (Maintenance)</option>
+            </select>
+          )}
+
+          {activeSubTab === 'models' ? (
+            <select
+              value={sortModelsBy}
+              onChange={e => setSortModelsBy(e.target.value)}
+              className="bg-stone-50 border border-stone-200 rounded-xl px-3 py-2 text-xs font-bold text-stone-700 outline-none focus:border-brand-500 cursor-pointer shadow-2xs"
+              title="តម្រៀបម៉ូឌែល (Sort models)"
+            >
+              <option value="name-asc">ម៉ាក/ម៉ូដែល: A ដល់ Z</option>
+              <option value="name-desc">ម៉ាក/ម៉ូដែល: Z ដល់ A</option>
+              <option value="price-asc">តម្លៃ: ទាបទៅខ្ពស់</option>
+              <option value="price-desc">តម្លៃ: ខ្ពស់ទៅទាប</option>
+              <option value="count-desc">ចំនួនគ្រឿងច្រើនមុន (Most Units)</option>
+            </select>
+          ) : (
+            <select
+              value={sortBikesBy}
+              onChange={e => setSortBikesBy(e.target.value)}
+              className="bg-stone-50 border border-stone-200 rounded-xl px-3 py-2 text-xs font-bold text-stone-700 outline-none focus:border-brand-500 cursor-pointer shadow-2xs"
+              title="តម្រៀបម៉ូតូ (Sort bikes)"
+            >
+              <option value="name-asc">ឈ្មោះម៉ូតូ: A ដល់ Z</option>
+              <option value="name-desc">ឈ្មោះម៉ូតូ: Z ដល់ A</option>
+              <option value="plate-asc">ស្លាកលេខ: A ដល់ Z</option>
+              <option value="plate-desc">ស្លាកលេខ: Z ដល់ A</option>
+              <option value="status">តាមស្ថានភាព (Status)</option>
+            </select>
+          )}
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="px-3 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
+              title="បោះពុម្ពបញ្ជីម៉ូតូ (Print Fleet)"
+            >
+              <i className="fa-solid fa-print text-stone-600"></i>
+              <span>Print</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => sendCategoryTelegramAlert && sendCategoryTelegramAlert({
+                category: 'Fleet',
+                title: 'Motorbike Fleet Status Report',
+                summary: `Total Bikes: ${bikes.length} across ${models.length} Models.\nAvailable: ${bikes.filter(b=>b.status==='available').length} | Rented: ${bikes.filter(b=>b.status==='rented').length} | Maintenance: ${bikes.filter(b=>b.status==='maintenance').length}`,
+                details: `Fleet inventory check and status verification.`
+              })}
+              disabled={tgSending}
+              className="px-3 py-2 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-2xs disabled:opacity-50 cursor-pointer"
+              title="ផ្ញើស្ថានភាពម៉ូតូទៅ Telegram"
+            >
+              <i className="fa-brands fa-telegram text-sky-500"></i>
+              <span>Alert Telegram</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Printable Report Header */}
+      <div className="print-only mb-4 p-4 border-b border-stone-300">
+        <h2 className="text-xl font-bold">Motorental Siemreab Angkor</h2>
+        <p className="text-sm text-stone-700 font-semibold">Motorbike Fleet & Inventory Manifest ({activeSubTab === 'models' ? 'Vehicle Models' : 'All Bikes'})</p>
+        <p className="text-xs text-stone-500">Total Bikes: {bikes.length} | Available: {bikes.filter(b=>b.status==='available').length} | Printed: {new Date().toLocaleString()}</p>
       </div>
 
       {/* Data Table */}
       <div className={`${cardCls} overflow-hidden`}>
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left whitespace-nowrap">
-            <thead className="bg-stone-50 border-b border-stone-100 text-xs text-stone-500 font-bold uppercase tracking-wider">
+            <thead className="bg-stone-50 border-b border-stone-100 text-xs text-stone-500 font-bold uppercase tracking-wider select-none">
               {activeSubTab === 'models' ? (
                 <tr>
                   <th className="px-6 py-3.5 w-12"><input type="checkbox" className="rounded border-stone-300" /></th>
-                  <th className="px-6 py-3.5">ម៉ាក & ម៉ូដែល</th>
-                  <th className="px-6 py-3.5">តម្លៃ/ថ្ងៃ</th>
+                  <th
+                    onClick={() => setSortModelsBy(prev => prev === 'name-asc' ? 'name-desc' : 'name-asc')}
+                    className="px-6 py-3.5 cursor-pointer hover:text-stone-900 transition"
+                    title="Click to sort by model name"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>ម៉ាក & ម៉ូដែល</span>
+                      <i className={`fa-solid fa-sort text-[10px] ${sortModelsBy.startsWith('name') ? 'text-brand-600' : 'text-stone-300'}`}></i>
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => setSortModelsBy(prev => prev === 'price-desc' ? 'price-asc' : 'price-desc')}
+                    className="px-6 py-3.5 cursor-pointer hover:text-stone-900 transition"
+                    title="Click to sort by price"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>តម្លៃ/ថ្ងៃ</span>
+                      <i className={`fa-solid fa-sort text-[10px] ${sortModelsBy.startsWith('price') ? 'text-brand-600' : 'text-stone-300'}`}></i>
+                    </div>
+                  </th>
                   <th className="px-6 py-3.5">ពណ៌</th>
-                  <th className="px-6 py-3.5 text-center">ចំនួនគ្រឿង</th>
+                  <th
+                    onClick={() => setSortModelsBy('count-desc')}
+                    className="px-6 py-3.5 text-center cursor-pointer hover:text-stone-900 transition"
+                    title="Click to sort by bike count"
+                  >
+                    <div className="flex items-center justify-center gap-1">
+                      <span>ចំនួនគ្រឿង</span>
+                      <i className={`fa-solid fa-sort text-[10px] ${sortModelsBy === 'count-desc' ? 'text-brand-600' : 'text-stone-300'}`}></i>
+                    </div>
+                  </th>
                   <th className="px-6 py-3.5 text-right">សកម្មភាព</th>
                 </tr>
               ) : (
                 <tr>
                   <th className="px-6 py-3.5 w-12"><input type="checkbox" className="rounded border-stone-300" /></th>
-                  <th className="px-6 py-3.5">ស្លាកលេខ</th>
-                  <th className="px-6 py-3.5">ប្រភេទ / ម៉ូដែល</th>
+                  <th
+                    onClick={() => setSortBikesBy(prev => prev === 'plate-asc' ? 'plate-desc' : 'plate-asc')}
+                    className="px-6 py-3.5 cursor-pointer hover:text-stone-900 transition"
+                    title="Click to sort by plate"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>ស្លាកលេខ</span>
+                      <i className={`fa-solid fa-sort text-[10px] ${sortBikesBy.startsWith('plate') ? 'text-brand-600' : 'text-stone-300'}`}></i>
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => setSortBikesBy(prev => prev === 'name-asc' ? 'name-desc' : 'name-asc')}
+                    className="px-6 py-3.5 cursor-pointer hover:text-stone-900 transition"
+                    title="Click to sort by model"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>ប្រភេទ / ម៉ូដែល</span>
+                      <i className={`fa-solid fa-sort text-[10px] ${sortBikesBy.startsWith('name') ? 'text-brand-600' : 'text-stone-300'}`}></i>
+                    </div>
+                  </th>
                   <th className="px-6 py-3.5">ពណ៌</th>
-                  <th className="px-6 py-3.5 text-center">ស្ថានភាព</th>
+                  <th
+                    onClick={() => setSortBikesBy('status')}
+                    className="px-6 py-3.5 text-center cursor-pointer hover:text-stone-900 transition"
+                    title="Click to sort by status"
+                  >
+                    <div className="flex items-center justify-center gap-1">
+                      <span>ស្ថានភាព</span>
+                      <i className={`fa-solid fa-sort text-[10px] ${sortBikesBy === 'status' ? 'text-brand-600' : 'text-stone-300'}`}></i>
+                    </div>
+                  </th>
                   <th className="px-6 py-3.5 text-right">សកម្មភាព</th>
                 </tr>
               )}
             </thead>
             <tbody className="divide-y divide-stone-100 text-sm">
               {activeSubTab === 'models' ? (
-                paginatedModels.map(m => (
-                  <tr key={m.id} className="hover:bg-stone-50/80 transition-colors">
-                    <td className="px-6 py-4"><input type="checkbox" className="rounded border-stone-300" /></td>
-                    <td className="px-6 py-4 font-bold text-stone-900">{m.name}</td>
-                    <td className="px-6 py-4 text-brand-600 font-bold">{currency(m.price || m.dailyPrice)}/day</td>
-                    <td className="px-6 py-4 text-stone-500 text-xs">Standard</td>
-                    <td className="px-6 py-4 text-center">
-                      <span className="px-2.5 py-1 bg-stone-100 rounded-full font-bold text-stone-700 text-xs">
-                        {bikes.filter(b=>String(b.modelId)===String(m.id) || b.name===m.name).length} គ្រឿង
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button onClick={()=>{setEditingModel(m); setModelForm({ name: m.name, description: m.description || '', price: m.price || m.dailyPrice || '' }); setModelModalOpen(true);}} className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 hover:bg-stone-100"><i className="fa-solid fa-pen text-xs"></i></button>
-                        <button onClick={()=>deleteModel(m.id)} className="p-1.5 rounded-lg text-stone-400 hover:text-rose-600 hover:bg-rose-50"><i className="fa-solid fa-trash text-xs"></i></button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                paginatedBikes.map(b => {
-                  const mdl = models.find(x=>String(x.id) === String(b.modelId));
+                paginatedModels.map(m => {
+                  const brandName = (m.brand || m.description || '').trim();
+                  const rawName = (m.name || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+                  const count = bikes.filter(b => String(b.modelId) === String(m.id) || b.name === m.name || (rawName && b.name === rawName)).length;
+
                   return (
-                    <tr key={b.id} className="hover:bg-stone-50/80 transition-colors">
+                    <tr key={m.id} className="hover:bg-stone-50/80 transition-colors">
                       <td className="px-6 py-4"><input type="checkbox" className="rounded border-stone-300" /></td>
-                      <td className="px-6 py-4 font-mono font-bold text-stone-900 text-xs">{b.plateNumber || 'គ្មានស្លាកលេខ'}</td>
-                      <td className="px-6 py-4 font-bold text-stone-800">{b.name || mdl?.name || 'Motor'}</td>
-                      <td className="px-6 py-4 text-stone-600">{b.color || 'Standard'}</td>
+                      <td className="px-6 py-4 font-bold text-stone-900">
+                        <div className="flex items-center gap-1.5">
+                          {brandName && <span className="text-brand-600 font-semibold">{brandName}</span>}
+                          <span>{rawName || (!brandName ? '—' : '')}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-brand-600 font-bold">{currency(m.dailyPrice || m.price)}/day</td>
+                      <td className="px-6 py-4 text-stone-500 text-xs">Standard</td>
                       <td className="px-6 py-4 text-center">
-                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${b.status==='rented' ? 'bg-blue-100 text-blue-700' : b.status==='maintenance' ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                          {b.status === 'rented' ? 'កំពុងជួល' : b.status === 'maintenance' ? 'ជួសជុល' : 'ទំនេរ'}
+                        <span className="px-2.5 py-1 bg-stone-100 rounded-full font-bold text-stone-700 text-xs">
+                          {count} គ្រឿង
                         </span>
                       </td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          <button onClick={()=>{setEditingBike(b); setBikeForm({ modelId: b.modelId||'', plateNumber: b.plateNumber||'', color: b.color||'', chassisNumber: b.frameNumber||'', status: b.status||'available', imageUrl: b.photoUrl||'' }); setBikeModalOpen(true);}} className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 hover:bg-stone-100"><i className="fa-solid fa-pen text-xs"></i></button>
-                          <button onClick={()=>deleteBike(b.id)} className="p-1.5 rounded-lg text-stone-400 hover:text-rose-600 hover:bg-rose-50"><i className="fa-solid fa-trash text-xs"></i></button>
+                          <button
+                            onClick={() => {
+                              setEditingModel(m);
+                              setModelForm({
+                                brand: brandName,
+                                name: rawName,
+                                dailyPrice: m.dailyPrice || m.price || '',
+                                price: m.dailyPrice || m.price || ''
+                              });
+                              setModelModalOpen(true);
+                            }}
+                            className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 hover:bg-stone-100"
+                            title="កែប្រែ"
+                          >
+                            <i className="fa-solid fa-pen text-xs"></i>
+                          </button>
+                          <button onClick={()=>deleteModel(m.id)} className="p-1.5 rounded-lg text-stone-400 hover:text-rose-600 hover:bg-rose-50" title="លុប">
+                            <i className="fa-solid fa-trash text-xs"></i>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
+                paginatedBikes.map(b => {
+                  const mdl = models.find(x => String(x.id) === String(b.modelId));
+                  const modelDisplayName = mdl ? (mdl.fullName || `${mdl.brand ? mdl.brand + ' ' : ''}${mdl.name || ''}`.trim()) : (b.name || 'Motor');
+                  return (
+                    <tr key={b.id} className="hover:bg-stone-50/80 transition-colors">
+                      <td className="px-6 py-4"><input type="checkbox" className="rounded border-stone-300" /></td>
+                      <td className="px-6 py-4 font-mono font-bold text-stone-900 text-xs">{b.plateNumber || 'គ្មានស្លាកលេខ'}</td>
+                      <td className="px-6 py-4 font-bold text-stone-800">{b.name || modelDisplayName}</td>
+                      <td className="px-6 py-4 text-stone-600">{b.color || 'Standard'}</td>
+                      <td className="px-6 py-4 text-center">
+                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${b.status==='rented' ? 'bg-blue-100 text-blue-700' : b.status==='maintenance' ? 'bg-rose-100 text-rose-700' : b.status==='inactive' ? 'bg-stone-200 text-stone-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                          {b.status === 'rented' ? 'កំពុងជួល' : b.status === 'maintenance' ? 'ជួសជុល' : b.status === 'inactive' ? 'ផ្អាក' : 'ទំនេរ'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => {
+                              setEditingBike(b);
+                              setBikeForm({
+                                modelId: b.modelId || '',
+                                plateNumber: b.plateNumber || '',
+                                color: b.color || '',
+                                chassisNumber: b.frameNumber || b.chassisNumber || '',
+                                status: (b.status || 'available').toLowerCase(),
+                                imageUrl: b.photoUrl || b.imageUrl || ''
+                              });
+                              setBikeModalOpen(true);
+                            }}
+                            className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 hover:bg-stone-100"
+                            title="កែប្រែ"
+                          >
+                            <i className="fa-solid fa-pen text-xs"></i>
+                          </button>
+                          <button onClick={()=>deleteBike(b.id)} className="p-1.5 rounded-lg text-stone-400 hover:text-rose-600 hover:bg-rose-50" title="លុប">
+                            <i className="fa-solid fa-trash text-xs"></i>
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -2346,21 +3160,64 @@ function FleetTab({ bikes, models, auth, fetchAll, inputCls, labelCls, cardCls, 
       {/* Model Modal */}
       {modelModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className={`${darkCard} w-full max-w-lg overflow-hidden shadow-2xl`}>
-            <div className="flex items-center justify-between p-5 border-b border-white/5 bg-[#1c1c2b]">
-              <h3 className="text-lg font-bold text-white">{editingModel ? 'កែប្រែប្រភេទ' : 'បន្ថែមប្រភេទ'}</h3>
-              <button onClick={()=>setModelModalOpen(false)} className="text-stone-500 hover:text-white"><i className="fa-solid fa-xmark"></i></button>
+          <div className="bg-white rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl border border-stone-200 modal-pop">
+            <div className="flex items-center justify-between p-5 border-b border-stone-100 bg-stone-50/50">
+              <h3 className="text-lg font-bold text-stone-900 flex items-center gap-2">
+                <i className="fa-solid fa-motorcycle text-brand-500"></i>
+                {editingModel ? 'កែប្រែម៉ូឌែលម៉ូតូ' : 'បន្ថែមម៉ូឌែលម៉ូតូ'}
+              </h3>
+              <button
+                type="button"
+                onClick={()=>setModelModalOpen(false)}
+                className="w-8 h-8 rounded-full bg-stone-100 text-stone-400 hover:text-stone-700 flex items-center justify-center transition-colors"
+              >
+                <i className="fa-solid fa-times text-sm"></i>
+              </button>
             </div>
-            <form onSubmit={handleModelSubmit} className="p-6 space-y-5 bg-[#1c1c2b]">
-              <div className="grid grid-cols-2 gap-5">
-                <div><label className={darkLabel}>ម៉ាក *</label><input type="text" value={modelForm.description} onChange={e=>setModelForm({...modelForm, description:e.target.value})} className={darkInput} required /></div>
-                <div><label className={darkLabel}>ម៉ូដែល *</label><input type="text" value={modelForm.name} onChange={e=>setModelForm({...modelForm, name:e.target.value})} className={darkInput} required /></div>
+            <form onSubmit={handleModelSubmit} className="p-6 space-y-4 bg-white text-sm">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className={labelCls}>ម៉ាក *</label>
+                  <input
+                    type="text"
+                    value={modelForm.brand}
+                    onChange={e=>setModelForm({...modelForm, brand:e.target.value})}
+                    placeholder="e.g. Honda, Yamaha..."
+                    className={inputCls}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className={labelCls}>ម៉ូឌែល *</label>
+                  <input
+                    type="text"
+                    value={modelForm.name}
+                    onChange={e=>setModelForm({...modelForm, name:e.target.value})}
+                    placeholder="e.g. Click 125cc, Scoopy..."
+                    className={inputCls}
+                  />
+                </div>
               </div>
-              <div><label className={darkLabel}>តម្លៃ/ថ្ងៃ (USD) *</label><input type="number" step="0.01" value={modelForm.price} onChange={e=>setModelForm({...modelForm, price:e.target.value})} className={darkInput} required /></div>
+              <div>
+                <label className={labelCls}>តម្លៃ/ថ្ងៃ (USD) *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={modelForm.dailyPrice}
+                  onChange={e=>setModelForm({...modelForm, dailyPrice:e.target.value, price:e.target.value})}
+                  placeholder="e.g. 10.00"
+                  className={inputCls}
+                  required
+                />
+              </div>
               
-              <div className="pt-4 flex items-center justify-end gap-4 border-t border-white/5">
-                <button type="button" onClick={()=>setModelModalOpen(false)} className="text-sm font-bold text-stone-400 hover:text-white">បោះបង់</button>
-                <button type="submit" className="px-6 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-500/20">រក្សាទុក</button>
+              <div className="pt-4 flex items-center justify-end gap-3 border-t border-stone-100">
+                <button type="button" onClick={()=>setModelModalOpen(false)} className={btnSecondary}>
+                  បោះបង់
+                </button>
+                <button type="submit" className={btnPrimary}>
+                  <i className="fa-solid fa-check mr-1.5"></i> រក្សាទុក
+                </button>
               </div>
             </form>
           </div>
@@ -2370,54 +3227,121 @@ function FleetTab({ bikes, models, auth, fetchAll, inputCls, labelCls, cardCls, 
       {/* Bike Modal */}
       {bikeModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className={`${darkCard} w-full max-w-lg overflow-hidden shadow-2xl max-h-[90vh] flex flex-col`}>
-            <div className="flex items-center justify-between p-5 border-b border-white/5 bg-[#1c1c2b] shrink-0">
-              <h3 className="text-lg font-bold text-white">{editingBike ? 'កែប្រែម៉ូតូ' : 'បន្ថែមម៉ូតូ'}</h3>
-              <button onClick={()=>setBikeModalOpen(false)} className="text-stone-500 hover:text-white"><i className="fa-solid fa-xmark"></i></button>
+          <div className="bg-white rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl border border-stone-200 modal-pop max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between p-5 border-b border-stone-100 bg-stone-50/50 shrink-0">
+              <h3 className="text-lg font-bold text-stone-900 flex items-center gap-2">
+                <i className="fa-solid fa-motorcycle text-brand-500"></i>
+                {editingBike ? 'កែប្រែទិន្នន័យម៉ូតូ' : 'បន្ថែមម៉ូតូថ្មី'}
+              </h3>
+              <button
+                type="button"
+                onClick={()=>setBikeModalOpen(false)}
+                className="w-8 h-8 rounded-full bg-stone-100 text-stone-400 hover:text-stone-700 flex items-center justify-center transition-colors"
+              >
+                <i className="fa-solid fa-times text-sm"></i>
+              </button>
             </div>
-            <form onSubmit={handleBikeSubmit} className="p-6 space-y-5 bg-[#1c1c2b] overflow-y-auto">
+            <form onSubmit={handleBikeSubmit} className="p-6 space-y-4 bg-white text-sm overflow-y-auto">
               <div>
-                <label className={darkLabel}>ប្រភេទម៉ូតូ *</label>
-                <select value={bikeForm.modelId} onChange={e=>setBikeForm({...bikeForm, modelId:e.target.value})} className={darkInput} required>
-                  <option value="">ជ្រើសរើសប្រភេទ...</option>
-                  {models.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}
+                <label className={labelCls}>ប្រភេទ / ម៉ូឌែលម៉ូតូ *</label>
+                <select value={bikeForm.modelId} onChange={e=>setBikeForm({...bikeForm, modelId:e.target.value})} className={inputCls} required>
+                  <option value="">ជ្រើសរើសប្រភេទម៉ូតូ...</option>
+                  {models.map(m => {
+                    const bName = (m.brand || m.description || '').trim();
+                    const mName = (m.name || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+                    const label = bName ? `${bName} ${mName}`.trim() : mName;
+                    return (
+                      <option key={m.id} value={m.id}>
+                        {label} ({currency(m.dailyPrice || m.price)}/ថ្ងៃ)
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
-              <div className="grid grid-cols-2 gap-5">
-                <div><label className={darkLabel}>ស្លាកលេខ *</label><input type="text" value={bikeForm.plateNumber} onChange={e=>setBikeForm({...bikeForm, plateNumber:e.target.value})} className={darkInput} required /></div>
-                <div><label className={darkLabel}>ពណ៌ *</label><input type="text" value={bikeForm.color} onChange={e=>setBikeForm({...bikeForm, color:e.target.value})} className={darkInput} required /></div>
-              </div>
-              <div className="grid grid-cols-2 gap-5">
-                <div><label className={darkLabel}>លេខតួ/ម៉ាស៊ីន</label><input type="text" value={bikeForm.chassisNumber} onChange={e=>setBikeForm({...bikeForm, chassisNumber:e.target.value})} className={darkInput} /></div>
-                <div><label className={darkLabel}>លេខកូដ</label><input type="text" className={darkInput} /></div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className={labelCls}>ស្លាកលេខ *</label>
+                  <input
+                    type="text"
+                    value={bikeForm.plateNumber}
+                    onChange={e=>setBikeForm({...bikeForm, plateNumber:e.target.value})}
+                    placeholder="e.g. 1X-9999"
+                    className={inputCls}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className={labelCls}>ពណ៌ *</label>
+                  <input
+                    type="text"
+                    value={bikeForm.color}
+                    onChange={e=>setBikeForm({...bikeForm, color:e.target.value})}
+                    placeholder="e.g. ក្រហម, ខ្មៅ, ស..."
+                    className={inputCls}
+                    required
+                  />
+                </div>
               </div>
               <div>
-                <label className={darkLabel}>ស្ថានភាព</label>
-                <select value={bikeForm.status} onChange={e=>setBikeForm({...bikeForm, status:e.target.value})} className={darkInput}>
-                  <option value="Available">Available</option>
-                  <option value="Rented">Rented</option>
-                  <option value="Inactive">Inactive</option>
+                <label className={labelCls}>លេខតួ / លេខម៉ាស៊ីន (Optional)</label>
+                <input
+                  type="text"
+                  value={bikeForm.chassisNumber}
+                  onChange={e=>setBikeForm({...bikeForm, chassisNumber:e.target.value})}
+                  placeholder="Frame / Engine number"
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>ស្ថានភាពម៉ូតូ</label>
+                <select value={(bikeForm.status || 'available').toLowerCase()} onChange={e=>setBikeForm({...bikeForm, status:e.target.value})} className={inputCls}>
+                  <option value="available">ទំនេរ (Available)</option>
+                  <option value="rented">កំពុងជួល (Rented)</option>
+                  <option value="maintenance">ជួសជុល (Maintenance)</option>
+                  <option value="inactive">ផ្អាក (Inactive)</option>
                 </select>
               </div>
               <div>
-                <label className={darkLabel}>រូបភាពម៉ូតូ</label>
-                <div className="border-2 border-dashed border-white/10 rounded-xl p-4 text-center relative hover:border-brand-500/50 transition-colors">
+                <label className={labelCls}>រូបភាពម៉ូតូ</label>
+                <div className="border-2 border-dashed border-stone-200 hover:border-brand-500 rounded-2xl p-4 text-center relative transition-colors bg-stone-50">
                   {bikeForm.imageUrl ? (
-                    <img src={bikeForm.imageUrl} alt="Bike" className="w-full h-32 object-cover rounded-lg mb-4" />
+                    <div className="relative mb-2">
+                      <img src={bikeForm.imageUrl} alt="Bike" className="w-full h-36 object-cover rounded-xl" />
+                      <button
+                        type="button"
+                        onClick={() => setBikeForm({ ...bikeForm, imageUrl: '' })}
+                        className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/60 text-white hover:bg-black flex items-center justify-center text-xs"
+                      >
+                        <i className="fa-solid fa-trash"></i>
+                      </button>
+                    </div>
                   ) : (
-                    <div className="py-8">
-                      <i className="fa-solid fa-cloud-arrow-up text-3xl text-stone-600 mb-2"></i>
-                      <p className="text-sm text-stone-500">ចុចទីនេះដើម្បីបញ្ចូលរូបភាព</p>
+                    <div className="py-6">
+                      <i className="fa-solid fa-cloud-arrow-up text-3xl text-stone-400 mb-2 block"></i>
+                      <p className="text-xs font-bold text-stone-600">ចុចទីនេះដើម្បីបញ្ចូលរូបភាពម៉ូតូ</p>
+                      <p className="text-[11px] text-stone-400 mt-0.5">PNG, JPG ឬ WEBP (Max 5MB)</p>
                     </div>
                   )}
-                  <input type="file" onChange={e=>handleImageUpload(e, setBikeForm, bikeForm)} className="absolute inset-0 opacity-0 cursor-pointer" />
-                  <input type="url" value={bikeForm.imageUrl} onChange={e=>setBikeForm({...bikeForm, imageUrl:e.target.value})} placeholder="https://..." className={darkInput} />
+                  <input type="file" accept="image/*" onChange={e=>handleImageUpload(e, setBikeForm, bikeForm)} className="absolute inset-0 opacity-0 cursor-pointer" />
+                </div>
+                <div className="mt-2">
+                  <input
+                    type="url"
+                    value={bikeForm.imageUrl}
+                    onChange={e=>setBikeForm({...bikeForm, imageUrl:e.target.value})}
+                    placeholder="ឬបិទភ្ជាប់តំណរភ្ជាប់រូបភាព (URL)..."
+                    className={inputCls}
+                  />
                 </div>
               </div>
               
-              <div className="pt-4 flex items-center justify-end gap-4 border-t border-white/5">
-                <button type="button" onClick={()=>setBikeModalOpen(false)} className="text-sm font-bold text-stone-400 hover:text-white">បោះបង់</button>
-                <button type="submit" className="px-6 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-500/20">រក្សាទុក</button>
+              <div className="pt-4 flex items-center justify-end gap-3 border-t border-stone-100">
+                <button type="button" onClick={()=>setBikeModalOpen(false)} className={btnSecondary}>
+                  បោះបង់
+                </button>
+                <button type="submit" className={btnPrimary}>
+                  <i className="fa-solid fa-check mr-1.5"></i> រក្សាទុក
+                </button>
               </div>
             </form>
           </div>
@@ -2499,1130 +3423,14 @@ function ReportsTab({ reports, reportPeriod, setReportPeriod, cardCls, currency 
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-//  SETTINGS TAB (6 Modules: Profile, Pricing, Staff, Payments, Notifications, Security)
-// ══════════════════════════════════════════════════════════════════════════════
+// SettingsTab is imported from ./admin/SettingsTab
 
-function SettingsTab({
-  settings, setSettings, saveSettings, settingsSaved,
-  staff, setStaff, auditLogs, setAuditLogs,
-  auth, authPost, authPatch, authDelete, fetchAll,
-  testResult, setTestResult,
-  inputCls, labelCls, cardCls, btnPrimary, btnSecondary, btnDanger, statusBadge, currency
-}) {
-  const [subTab, setSubTab] = useState('business');
-  
-  // Staff modal state
-  const [staffModalOpen, setStaffModalOpen] = useState(false);
-  const [editingStaff, setEditingStaff] = useState(null);
-  const [staffForm, setStaffForm] = useState({ username: '', password: '', fullName: '', role: 'receptionist', permissions: 'bookings,rooms,rentals,invoices,guests', phone: '', status: 'active' });
-  const [staffSearch, setStaffSearch] = useState('');
-
-  // Audit log filter state
-  const [auditSearch, setAuditSearch] = useState('');
-
-  // Backup loading state
-  const [backupLoading, setBackupLoading] = useState(false);
-  const [restoreMessage, setRestoreMessage] = useState('');
-
-  const SUB_TABS = [
-    { id: 'website_copy',  label: 'Website Copy (Texts)', khmer: 'អត្ថបទគេហទំព័រ', icon: 'fa-language' },
-    { id: 'business',      label: 'Hotel Profile & Policies', khmer: 'ព័ត៌មានអចលនទ្រព្យ', icon: 'fa-hotel' },
-    { id: 'pricing',       label: 'Pricing, Taxes & Currency', khmer: 'តម្លៃ ពន្ធ និងរូបិយប័ណ្ណ', icon: 'fa-coins' },
-    { id: 'staff',         label: 'Users & Permissions', khmer: 'សិទ្ធិបុគ្គលិក', icon: 'fa-user-shield' },
-    { id: 'payments',      label: 'Payments & Invoicing', khmer: 'ការទូទាត់ និងវិក្កយបត្រ', icon: 'fa-file-invoice-dollar' },
-    { id: 'notifications', label: 'Notifications & Alerts', khmer: 'ការជូនដំណឹង', icon: 'fa-bell' },
-    { id: 'security',      label: 'Security & Backup', khmer: 'សន្តិសុខ និង Backup', icon: 'fa-shield-halved' },
-  ];
-
-  // Staff Handlers
-  const handleOpenStaffModal = (st = null) => {
-    if (st) {
-      setEditingStaff(st);
-      setStaffForm({ username: st.username, password: '', fullName: st.fullName, role: st.role, permissions: st.permissions || '', phone: st.phone || '', status: st.status || 'active' });
-    } else {
-      setEditingStaff(null);
-      setStaffForm({ username: '', password: '', fullName: '', role: 'receptionist', permissions: 'bookings,rooms,rentals,invoices,guests', phone: '', status: 'active' });
-    }
-    setStaffModalOpen(true);
-  };
-
-  const handleSaveStaff = async (e) => {
-    e.preventDefault();
-    if (editingStaff) {
-      await fetch(`/api/staff/${editingStaff.id}`, authPatch(staffForm));
-    } else {
-      await fetch('/api/staff', authPost(staffForm));
-    }
-    setStaffModalOpen(false);
-    fetchAll();
-  };
-
-  const handleDeleteStaff = async (id) => {
-    if (!await showConfirm('Delete Staff', 'Are you sure you want to delete this staff account?', 'Delete', 'danger')) return;
-    await fetch(`/api/staff/${id}`, authDelete());
-    fetchAll();
-  };
-
-  // Backup Handlers
-  const handleDownloadBackup = async () => {
-    setBackupLoading(true);
-    try {
-      const res = await fetch('/api/backup', { headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` } });
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `siemreap-angkor-backup-${Date.now()}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    } catch (err) {
-      showModal('error', 'Backup Failed', err.message);
-    } finally {
-      setBackupLoading(false);
-    }
-  };
-
-  const handleRestoreFile = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    if (!await showConfirm('⚠️ Restore Database', 'WARNING: Restoring will replace ALL existing data in the database with the backup file. This action cannot be undone.', 'Restore', 'danger')) return;
-    
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-      try {
-        const json = JSON.parse(ev.target.result);
-        const res = await fetch('/api/restore', authPost({ data: json.data || json }));
-        const d = await res.json();
-        if (res.ok) {
-          setRestoreMessage('✅ Database restored successfully! Refreshing data...');
-          fetchAll();
-          setTimeout(() => setRestoreMessage(''), 5000);
-        } else {
-          setRestoreMessage(`❌ Restore failed: ${d.error}`);
-        }
-      } catch (err) {
-        setRestoreMessage(`❌ Invalid JSON backup file: ${err.message}`);
-      }
-    };
-    reader.readAsText(file);
-  };
-
-  const bProfile = settings.business_profile || {};
-  const pTax = settings.pricing_tax || {};
-  const pMethods = settings.payment_methods || {};
-  const invSettings = settings.invoice_settings || {};
-  const notifSettings = settings.notification_settings || {};
-  const secSettings = settings.security_settings || {};
-
-  return (
-    <div className="space-y-6 max-w-5xl">
-      {/* Sub-tabs Pills */}
-      <div className="flex flex-wrap gap-2 p-1.5 bg-stone-200/70 rounded-2xl">
-        {SUB_TABS.map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setSubTab(tab.id)}
-            className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
-              subTab === tab.id
-                ? 'bg-white text-stone-900 shadow-sm'
-                : 'text-stone-600 hover:text-stone-900 hover:bg-white/40'
-            }`}
-          >
-            <i className={`fa-solid ${tab.icon} ${subTab === tab.id ? 'text-brand-500' : 'text-stone-400'}`}></i>
-            <div className="text-left">
-              <span className="block leading-tight">{tab.label}</span>
-              <span className="block text-[10px] opacity-70 font-normal">{tab.khmer}</span>
-            </div>
-          </button>
-        ))}
-      </div>
-
-      {/* ───────────────────────────────────────────────────────────────────── */}
-      {/* 0. WEBSITE COPY (Public Texts) */}
-      {/* ───────────────────────────────────────────────────────────────────── */}
-      {subTab === 'website_copy' && (
-        <div className="space-y-6">
-          <div className={`${cardCls} p-6`}>
-            <div className="flex items-center justify-between mb-6 pb-4 border-b border-stone-100">
-              <div>
-                <h3 className="font-bold text-lg text-stone-900"><i className="fa-solid fa-language mr-2 text-brand-500"></i>Public Page Texts</h3>
-                <p className="text-xs text-stone-500">អត្ថបទសម្រាប់គេហទំព័រ (Welcome, About, ...)</p>
-              </div>
-              <button onClick={saveSettings} className={btnPrimary}>{settingsSaved ? '✅ Saved!' : 'Save Texts'}</button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-sm mb-6">
-              <div className="col-span-full mb-2 border-b border-stone-100 pb-2"><h4 className="font-bold text-stone-700">Hero Section</h4></div>
-              <div>
-                <label className={labelCls}>Hero Title</label>
-                <input type="text" className={inputCls} value={settings.public_texts?.hero_title || ''} onChange={e=>setSettings({...settings, public_texts: {...(settings.public_texts||{}), hero_title: e.target.value}})} />
-              </div>
-              <div>
-                <label className={labelCls}>Hero Button</label>
-                <input type="text" className={inputCls} value={settings.public_texts?.hero_btn || ''} onChange={e=>setSettings({...settings, public_texts: {...(settings.public_texts||{}), hero_btn: e.target.value}})} />
-              </div>
-              <div className="col-span-full">
-                <label className={labelCls}>Hero Subtitle</label>
-                <textarea className={inputCls} rows="2" value={settings.public_texts?.hero_subtitle || ''} onChange={e=>setSettings({...settings, public_texts: {...(settings.public_texts||{}), hero_subtitle: e.target.value}})}></textarea>
-              </div>
-              <div className="col-span-full mt-2">
-                <label className={labelCls}>Hero Slideshow Images (URLs)</label>
-                <div className="space-y-3">
-                  {(asArray(settings.hero_images)).map((imgUrl, i) => (
-                    <div key={i} className="flex gap-2 items-center">
-                      <div className="w-12 h-12 shrink-0 bg-stone-100 rounded border border-stone-200 overflow-hidden flex items-center justify-center">
-                        {imgUrl ? <img src={imgUrl} alt="Slide" className="w-full h-full object-cover" onError={e=>e.target.style.display='none'}/> : <i className="fa-solid fa-image text-stone-300"></i>}
-                      </div>
-                      <input 
-                        type="text" 
-                        placeholder="https://... or /uploads/hero.jpg"
-                        className={inputCls} 
-                        value={typeof imgUrl === 'string' && imgUrl.startsWith('data:') ? '(uploaded image)' : imgUrl} 
-                        onChange={e => {
-                          const newImgs = [...asArray(settings.hero_images)];
-                          newImgs[i] = e.target.value;
-                          setSettings({...settings, hero_images: newImgs});
-                        }} 
-                      />
-                      <button 
-                        onClick={() => {
-                          const newImgs = [...asArray(settings.hero_images)];
-                          newImgs.splice(i, 1);
-                          setSettings({...settings, hero_images: newImgs});
-                        }}
-                        className="w-10 h-10 shrink-0 flex items-center justify-center text-red-400 hover:bg-red-50 hover:text-red-500 rounded-lg transition-colors"
-                      >
-                        <i className="fa-solid fa-trash"></i>
-                      </button>
-                    </div>
-                  ))}
-                  <button 
-                    onClick={() => setSettings({...settings, hero_images: [...(settings.hero_images || []), '']})}
-                    className="text-xs font-bold text-brand-500 hover:text-brand-600 flex items-center gap-2 mt-2 px-2 py-1 rounded hover:bg-brand-50 transition-colors w-max"
-                  >
-                    <i className="fa-solid fa-plus"></i> Add Image URL
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-sm mb-6">
-              <div className="col-span-full mb-2 border-b border-stone-100 pb-2"><h4 className="font-bold text-stone-700">Motor Rentals Section</h4></div>
-              <div>
-                <label className={labelCls}>Section Label</label>
-                <input type="text" className={inputCls} value={settings.public_texts?.bikes_section || ''} onChange={e=>setSettings({...settings, public_texts: {...(settings.public_texts||{}), bikes_section: e.target.value}})} />
-              </div>
-              <div>
-                <label className={labelCls}>Section Title</label>
-                <input type="text" className={inputCls} value={settings.public_texts?.bikes_title || ''} onChange={e=>setSettings({...settings, public_texts: {...(settings.public_texts||{}), bikes_title: e.target.value}})} />
-              </div>
-              <div className="col-span-full">
-                <label className={labelCls}>Section Subtitle</label>
-                <textarea className={inputCls} rows="2" value={settings.public_texts?.bikes_subtitle || ''} onChange={e=>setSettings({...settings, public_texts: {...(settings.public_texts||{}), bikes_subtitle: e.target.value}})}></textarea>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-sm">
-              <div className="col-span-full mb-2 border-b border-stone-100 pb-2"><h4 className="font-bold text-stone-700">Guesthouses Page</h4></div>
-              <div className="col-span-full">
-                <label className={labelCls}>Page Title</label>
-                <input type="text" className={inputCls} value={settings.public_texts?.guesthouses_title || ''} onChange={e=>setSettings({...settings, public_texts: {...(settings.public_texts||{}), guesthouses_title: e.target.value}})} />
-              </div>
-              <div className="col-span-full">
-                <label className={labelCls}>Page Subtitle</label>
-                <textarea className={inputCls} rows="2" value={settings.public_texts?.guesthouses_subtitle || ''} onChange={e=>setSettings({...settings, public_texts: {...(settings.public_texts||{}), guesthouses_subtitle: e.target.value}})}></textarea>
-              </div>
-            </div>
-            
-          </div>
-        </div>
-      )}
-
-      {/* ───────────────────────────────────────────────────────────────────── */}
-      {/* 1. HOTEL / BUSINESS PROFILE */}
-      {/* ───────────────────────────────────────────────────────────────────── */}
-      {subTab === 'business' && (
-        <div className="space-y-6">
-          <div className={`${cardCls} p-6`}>
-            <div className="flex items-center justify-between mb-6 pb-4 border-b border-stone-100">
-              <div>
-                <h3 className="font-bold text-lg text-stone-900"><i className="fa-solid fa-hotel mr-2 text-brand-500"></i>General Business Profile</h3>
-                <p className="text-xs text-stone-500">ឈ្មោះសណ្ឋាគារ, លេខទូរស័ព្ទ, អ៊ីមែល, អាសយដ្ឋាន, និង Logo</p>
-              </div>
-              <button onClick={saveSettings} className={btnPrimary}>{settingsSaved ? '✅ Saved!' : 'Save Profile'}</button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-sm">
-              <div>
-                <label className={labelCls}>Business / Hotel Name</label>
-                <input
-                  type="text"
-                  value={bProfile.hotelName || ''}
-                  onChange={e => setSettings({ ...settings, business_profile: { ...bProfile, hotelName: e.target.value } })}
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>Contact Phone</label>
-                <input
-                  type="text"
-                  value={bProfile.phone || ''}
-                  onChange={e => setSettings({ ...settings, business_profile: { ...bProfile, phone: e.target.value } })}
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>Official Email</label>
-                <input
-                  type="email"
-                  value={bProfile.email || ''}
-                  onChange={e => setSettings({ ...settings, business_profile: { ...bProfile, email: e.target.value } })}
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>Logo Path / URL</label>
-                <div className="flex gap-3 items-center">
-                  <input
-                    type="text"
-                    value={bProfile.logo || ''}
-                    onChange={e => setSettings({ ...settings, business_profile: { ...bProfile, logo: e.target.value } })}
-                    className={inputCls}
-                  />
-                  <img src={bProfile.logo || '/assets/logo.png'} alt="Logo" className="w-10 h-10 object-contain rounded-lg border border-stone-200 bg-stone-50 p-1 shrink-0" />
-                </div>
-              </div>
-              <div className="md:col-span-2">
-                <label className={labelCls}>Physical Address</label>
-                <input
-                  type="text"
-                  value={bProfile.address || ''}
-                  onChange={e => setSettings({ ...settings, business_profile: { ...bProfile, address: e.target.value } })}
-                  className={inputCls}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className={`${cardCls} p-6`}>
-            <h3 className="font-bold text-lg text-stone-900 mb-6 pb-4 border-b border-stone-100"><i className="fa-solid fa-clock mr-2 text-indigo-500"></i>Stay Policies & Check-in Times</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-sm">
-              <div>
-                <label className={labelCls}>Standard Check-in Time</label>
-                <input
-                  type="time"
-                  value={bProfile.checkInTime || '14:00'}
-                  onChange={e => setSettings({ ...settings, business_profile: { ...bProfile, checkInTime: e.target.value } })}
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>Standard Check-out Time</label>
-                <input
-                  type="time"
-                  value={bProfile.checkOutTime || '12:00'}
-                  onChange={e => setSettings({ ...settings, business_profile: { ...bProfile, checkOutTime: e.target.value } })}
-                  className={inputCls}
-                />
-              </div>
-              <div className="md:col-span-2">
-                <label className={labelCls}>Cancellation Policy</label>
-                <textarea
-                  rows="3"
-                  value={bProfile.cancellationPolicy || ''}
-                  onChange={e => setSettings({ ...settings, business_profile: { ...bProfile, cancellationPolicy: e.target.value } })}
-                  className={inputCls}
-                  placeholder="Rules regarding refunds and cancellation deadlines..."
-                ></textarea>
-              </div>
-            </div>
-          </div>
-
-          <div className={`${cardCls} p-6`}>
-            <h3 className="font-bold text-lg text-stone-900 mb-6 pb-4 border-b border-stone-100"><i className="fa-solid fa-file-shield mr-2 text-emerald-500"></i>Security Deposits & Rental Rules</h3>
-            <div className="space-y-4 text-sm">
-              <div>
-                <label className={labelCls}>Deposit Policy (Room & Motorbike)</label>
-                <textarea
-                  rows="2"
-                  value={bProfile.depositRule || ''}
-                  onChange={e => setSettings({ ...settings, business_profile: { ...bProfile, depositRule: e.target.value } })}
-                  className={inputCls}
-                  placeholder="e.g. $50 deposit or original passport..."
-                ></textarea>
-              </div>
-              <div>
-                <label className={labelCls}>Motorcycle Rental Requirements & Safety Terms</label>
-                <textarea
-                  rows="2"
-                  value={bProfile.rentalTerms || ''}
-                  onChange={e => setSettings({ ...settings, business_profile: { ...bProfile, rentalTerms: e.target.value } })}
-                  className={inputCls}
-                  placeholder="e.g. Driver's license / Passport rules, helmet policies..."
-                ></textarea>
-              </div>
-              <div className="pt-2">
-                <button onClick={saveSettings} className={btnPrimary}>{settingsSaved ? '✅ Saved!' : 'Save All Business Settings'}</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ───────────────────────────────────────────────────────────────────── */}
-      {/* 2. PRICING, TAXES & CURRENCY */}
-      {/* ───────────────────────────────────────────────────────────────────── */}
-      {subTab === 'pricing' && (
-        <div className="space-y-6">
-          <div className={`${cardCls} p-6`}>
-            <div className="flex items-center justify-between mb-6 pb-4 border-b border-stone-100">
-              <div>
-                <h3 className="font-bold text-lg text-stone-900"><i className="fa-solid fa-coins mr-2 text-amber-500"></i>Currency & Exchange Rates</h3>
-                <p className="text-xs text-stone-500">កំណត់រូបិយប័ណ្ណមេ ($ USD / ៛ KHR) និងអត្រាប្តូរប្រាក់</p>
-              </div>
-              <button onClick={saveSettings} className={btnPrimary}>{settingsSaved ? '✅ Saved!' : 'Save Pricing'}</button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5 text-sm">
-              <div>
-                <label className={labelCls}>Primary System Currency</label>
-                <select
-                  value={pTax.primaryCurrency || 'USD'}
-                  onChange={e => setSettings({ ...settings, pricing_tax: { ...pTax, primaryCurrency: e.target.value } })}
-                  className={inputCls}
-                >
-                  <option value="USD">USD ($ - US Dollar)</option>
-                  <option value="KHR">KHR (៛ - Khmer Riel)</option>
-                </select>
-              </div>
-              <div>
-                <label className={labelCls}>Secondary Currency</label>
-                <select
-                  value={pTax.secondaryCurrency || 'KHR'}
-                  onChange={e => setSettings({ ...settings, pricing_tax: { ...pTax, secondaryCurrency: e.target.value } })}
-                  className={inputCls}
-                >
-                  <option value="KHR">KHR (៛ - Khmer Riel)</option>
-                  <option value="USD">USD ($ - US Dollar)</option>
-                </select>
-              </div>
-              <div>
-                <label className={labelCls}>Exchange Rate (1 USD to KHR)</label>
-                <div className="relative">
-                  <span className="absolute left-3 top-2 text-stone-400 font-bold">៛</span>
-                  <input
-                    type="number"
-                    value={pTax.exchangeRate || 4100}
-                    onChange={e => setSettings({ ...settings, pricing_tax: { ...pTax, exchangeRate: parseFloat(e.target.value) } })}
-                    className={`${inputCls} pl-8`}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className={`${cardCls} p-6`}>
-            <h3 className="font-bold text-lg text-stone-900 mb-6 pb-4 border-b border-stone-100"><i className="fa-solid fa-receipt mr-2 text-blue-500"></i>Taxes, Fees & Late Penalty Rates</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5 text-sm">
-              <div>
-                <label className={labelCls}>VAT / Tax Rate (%)</label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    value={pTax.vatPercent || 0}
-                    onChange={e => setSettings({ ...settings, pricing_tax: { ...pTax, vatPercent: parseFloat(e.target.value) } })}
-                    className={inputCls}
-                  />
-                  <span className="absolute right-3 top-2 text-stone-400 font-bold">%</span>
-                </div>
-              </div>
-              <div>
-                <label className={labelCls}>Service Charge (%)</label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    value={pTax.serviceChargePercent || 0}
-                    onChange={e => setSettings({ ...settings, pricing_tax: { ...pTax, serviceChargePercent: parseFloat(e.target.value) } })}
-                    className={inputCls}
-                  />
-                  <span className="absolute right-3 top-2 text-stone-400 font-bold">%</span>
-                </div>
-              </div>
-              <div>
-                <label className={labelCls}>Room Cleaning Fee ($)</label>
-                <input
-                  type="number"
-                  value={pTax.cleaningFee || 0}
-                  onChange={e => setSettings({ ...settings, pricing_tax: { ...pTax, cleaningFee: parseFloat(e.target.value) } })}
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>Late Check-out Fee ($/hour)</label>
-                <input
-                  type="number"
-                  value={pTax.lateCheckoutPerHour || 5}
-                  onChange={e => setSettings({ ...settings, pricing_tax: { ...pTax, lateCheckoutPerHour: parseFloat(e.target.value) } })}
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>Late Bike Return Fee ($/hour)</label>
-                <input
-                  type="number"
-                  value={pTax.lateReturnPerHour || 3}
-                  onChange={e => setSettings({ ...settings, pricing_tax: { ...pTax, lateReturnPerHour: parseFloat(e.target.value) } })}
-                  className={inputCls}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className={`${cardCls} p-6`}>
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="font-bold text-lg text-stone-900"><i className="fa-solid fa-calendar-days mr-2 text-purple-500"></i>Seasonal Rates Multiplier (High / Peak Season)</h3>
-                <p className="text-xs text-stone-500">កែប្រែតម្លៃបន្ទប់ និងម៉ូតូដោយស្វ័យប្រវត្តិតាមរដូវកាលទេសចរណ៍</p>
-              </div>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={pTax.highSeasonActive || false}
-                  onChange={e => setSettings({ ...settings, pricing_tax: { ...pTax, highSeasonActive: e.target.checked } })}
-                  className="sr-only peer"
-                />
-                <div className="w-11 h-6 bg-stone-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-stone-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
-              </label>
-            </div>
-            
-            {pTax.highSeasonActive && (
-              <div className="p-4 bg-purple-50 rounded-xl border border-purple-100 space-y-3 mt-4 text-sm">
-                <div className="flex items-center gap-4">
-                  <label className="text-xs font-bold text-purple-900 w-48">High Season Rate Multiplier</label>
-                  <input
-                    type="number"
-                    step="0.05"
-                    value={pTax.highSeasonMultiplier || 1.2}
-                    onChange={e => setSettings({ ...settings, pricing_tax: { ...pTax, highSeasonMultiplier: parseFloat(e.target.value) } })}
-                    className="w-24 bg-white border border-purple-200 rounded-lg p-2 text-center font-bold text-purple-900"
-                  />
-                  <span className="text-xs text-purple-700 font-medium">(e.g. 1.2 = +20% increase for all rooms & bike rates)</span>
-                </div>
-              </div>
-            )}
-
-            <div className="pt-5 border-t border-stone-100 mt-5">
-              <button onClick={saveSettings} className={btnPrimary}>{settingsSaved ? '✅ Saved!' : 'Save Pricing & Taxes'}</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ───────────────────────────────────────────────────────────────────── */}
-      {/* 3. STAFF & PERMISSIONS */}
-      {/* ───────────────────────────────────────────────────────────────────── */}
-      {subTab === 'staff' && (
-        <div className="space-y-6">
-          <div className={`${cardCls} overflow-hidden`}>
-            <div className="p-6 border-b border-stone-100 flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <h3 className="font-bold text-lg text-stone-900"><i className="fa-solid fa-users-gear mr-2 text-violet-500"></i>Staff Accounts & Role Permissions</h3>
-                <p className="text-xs text-stone-500">បង្កើត Account ឱ្យបុគ្គលិក និងកំណត់សិទ្ធិមើល/កែប្រែទិន្នន័យ</p>
-              </div>
-              <button onClick={() => handleOpenStaffModal()} className={btnPrimary}>
-                <i className="fa-solid fa-user-plus mr-1.5"></i> Add New Staff
-              </button>
-            </div>
-
-            <div className="p-4 border-b border-stone-100 bg-stone-50">
-              <input
-                type="text"
-                value={staffSearch}
-                onChange={e => setStaffSearch(e.target.value)}
-                placeholder="Search staff by name, role, username..."
-                className={inputCls}
-              />
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm text-left">
-                <thead className="bg-stone-50 border-b border-stone-200 text-xs text-stone-500 uppercase tracking-widest">
-                  <tr>
-                    {['Staff Member', 'Username', 'Role', 'Permissions', 'Phone', 'Status', 'Actions'].map(h => (
-                      <th key={h} className="px-4 py-3 font-bold">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {staff
-                    .filter(s => !staffSearch || s.fullName.toLowerCase().includes(staffSearch.toLowerCase()) || s.username.toLowerCase().includes(staffSearch.toLowerCase()) || s.role.toLowerCase().includes(staffSearch.toLowerCase()))
-                    .map(st => {
-                      const roleColors = {
-                        admin: 'bg-rose-100 text-rose-800 border-rose-200',
-                        receptionist: 'bg-blue-100 text-blue-800 border-blue-200',
-                        housekeeper: 'bg-amber-100 text-amber-800 border-amber-200',
-                        mechanic: 'bg-stone-200 text-stone-800 border-stone-300'
-                      };
-                      return (
-                        <tr key={st.id} className="border-b border-stone-100 hover:bg-stone-50 transition-colors">
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-3">
-                              <div className="w-9 h-9 rounded-full bg-brand-50 border border-brand-200 flex items-center justify-center font-bold text-brand-600">
-                                {st.fullName.charAt(0)}
-                              </div>
-                              <div>
-                                <p className="font-bold text-stone-900">{st.fullName}</p>
-                                <p className="text-[10px] text-stone-400">Added: {st.createdAt ? new Date(st.createdAt).toLocaleDateString() : 'N/A'}</p>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 font-mono text-xs text-stone-600">{st.username}</td>
-                          <td className="px-4 py-3">
-                            <span className={`text-xs font-bold px-2.5 py-1 rounded-full border capitalize ${roleColors[st.role] || 'bg-stone-100 text-stone-600'}`}>
-                              {st.role}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-xs text-stone-500 max-w-[200px] truncate">
-                            {st.role === 'admin' ? 'Full System Access (All)' : st.permissions || 'Default Staff'}
-                          </td>
-                          <td className="px-4 py-3 font-mono text-xs">{st.phone || '—'}</td>
-                          <td className="px-4 py-3">
-                            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${st.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'}`}>
-                              {st.status}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-1.5">
-                              <button onClick={() => handleOpenStaffModal(st)} className="w-8 h-8 flex items-center justify-center text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors">
-                                <i className="fa-solid fa-pen text-xs"></i>
-                              </button>
-                              {st.role !== 'admin' && (
-                                <button onClick={() => handleDeleteStaff(st.id)} className="w-8 h-8 flex items-center justify-center text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors">
-                                  <i className="fa-solid fa-trash text-xs"></i>
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  {staff.length === 0 && (
-                    <tr><td colSpan="7" className="py-12 text-center text-stone-400">No staff members found.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Staff Modal */}
-          {staffModalOpen && (
-            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-5">
-              <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl border border-stone-200 anim-scale-in">
-                <div className="flex items-center justify-between mb-5 pb-3 border-b border-stone-100">
-                  <h3 className="font-bold text-lg text-stone-900">
-                    <i className="fa-solid fa-user-gear mr-2 text-brand-500"></i>
-                    {editingStaff ? 'Edit Staff Account' : 'Register New Staff'}
-                  </h3>
-                  <button onClick={() => setStaffModalOpen(false)} className="w-8 h-8 rounded-full bg-stone-100 text-stone-400 hover:text-stone-700 flex items-center justify-center">
-                    <i className="fa-solid fa-times"></i>
-                  </button>
-                </div>
-
-                <form onSubmit={handleSaveStaff} className="space-y-4 text-sm">
-                  <div>
-                    <label className={labelCls}>Full Name</label>
-                    <input
-                      type="text"
-                      value={staffForm.fullName}
-                      onChange={e => setStaffForm({ ...staffForm, fullName: e.target.value })}
-                      className={inputCls}
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Username</label>
-                    <input
-                      type="text"
-                      value={staffForm.username}
-                      onChange={e => setStaffForm({ ...staffForm, username: e.target.value })}
-                      className={inputCls}
-                      disabled={!!editingStaff}
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className={labelCls}>{editingStaff ? 'Password (leave blank to keep unchanged)' : 'Password'}</label>
-                    <input
-                      type="password"
-                      value={staffForm.password}
-                      onChange={e => setStaffForm({ ...staffForm, password: e.target.value })}
-                      className={inputCls}
-                      required={!editingStaff}
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className={labelCls}>System Role</label>
-                      <select
-                        value={staffForm.role}
-                        onChange={e => setStaffForm({ ...staffForm, role: e.target.value })}
-                        className={inputCls}
-                      >
-                        <option value="receptionist">Receptionist (Front Desk)</option>
-                        <option value="housekeeper">Housekeeper (Cleaning)</option>
-                        <option value="mechanic">Mechanic (Fleet Service)</option>
-                        <option value="admin">Administrator (Full Access)</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className={labelCls}>Phone Number</label>
-                      <input
-                        type="text"
-                        value={staffForm.phone}
-                        onChange={e => setStaffForm({ ...staffForm, phone: e.target.value })}
-                        className={inputCls}
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className={labelCls}>Status</label>
-                    <select
-                      value={staffForm.status}
-                      onChange={e => setStaffForm({ ...staffForm, status: e.target.value })}
-                      className={inputCls}
-                    >
-                      <option value="active">Active (Can Login)</option>
-                      <option value="inactive">Inactive / Suspended</option>
-                    </select>
-                  </div>
-
-                  <div className="pt-4 flex gap-3">
-                    <button type="submit" className={`${btnPrimary} flex-1`}>
-                      {editingStaff ? 'Update Account' : 'Create Account'}
-                    </button>
-                    <button type="button" onClick={() => setStaffModalOpen(false)} className={btnSecondary}>
-                      Cancel
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ───────────────────────────────────────────────────────────────────── */}
-      {/* 4. PAYMENT METHODS & INVOICING */}
-      {/* ───────────────────────────────────────────────────────────────────── */}
-      {subTab === 'payments' && (
-        <div className="space-y-6">
-          <div className={`${cardCls} p-6`}>
-            <div className="flex items-center justify-between mb-6 pb-4 border-b border-stone-100">
-              <div>
-                <h3 className="font-bold text-lg text-stone-900"><i className="fa-solid fa-credit-card mr-2 text-emerald-500"></i>Payment Gateways & Methods</h3>
-                <p className="text-xs text-stone-500">ភ្ជាប់ប្រព័ន្ធទូទាត់ (ABA KHQR, Cash, Credit Card, Bank Transfer)</p>
-              </div>
-              <button onClick={saveSettings} className={btnPrimary}>{settingsSaved ? '✅ Saved!' : 'Save Payment Config'}</button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-              {[
-                { key: 'cashEnabled', label: 'Cash on Arrival', icon: 'fa-money-bill-wave', color: 'text-emerald-600 bg-emerald-50' },
-                { key: 'abaKhqrEnabled', label: 'ABA Bank KHQR / Bakong', icon: 'fa-qrcode', color: 'text-blue-600 bg-blue-50' },
-                { key: 'cardEnabled', label: 'Credit / Debit Card POS', icon: 'fa-credit-card', color: 'text-purple-600 bg-purple-50' },
-                { key: 'bankTransferEnabled', label: 'Direct Bank Transfer', icon: 'fa-building-columns', color: 'text-amber-600 bg-amber-50' },
-              ].map(m => (
-                <div key={m.key} className="flex items-center justify-between p-4 bg-stone-50 rounded-xl border border-stone-200">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${m.color}`}>
-                      <i className={`fa-solid ${m.icon} text-lg`}></i>
-                    </div>
-                    <span className="font-bold text-sm text-stone-900">{m.label}</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={pMethods[m.key] !== false}
-                    onChange={e => setSettings({ ...settings, payment_methods: { ...pMethods, [m.key]: e.target.checked } })}
-                    className="w-5 h-5 accent-brand-500 rounded cursor-pointer"
-                  />
-                </div>
-              ))}
-            </div>
-
-            {/* ABA KHQR Details */}
-            {pMethods.abaKhqrEnabled !== false && (
-              <div className="p-5 bg-blue-50/70 border border-blue-200 rounded-2xl space-y-4">
-                <h4 className="font-bold text-sm text-blue-950 flex items-center gap-2">
-                  <i className="fa-solid fa-qrcode text-blue-600"></i> ABA KHQR Account Details
-                </h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <label className={labelCls}>ABA Account Name</label>
-                    <input
-                      type="text"
-                      value={pMethods.abaAccountName || ''}
-                      onChange={e => setSettings({ ...settings, payment_methods: { ...pMethods, abaAccountName: e.target.value } })}
-                      className={inputCls}
-                      placeholder="e.g. MOTOR RENTAL SIEM REAP ANGKOR"
-                    />
-                  </div>
-                  <div>
-                    <label className={labelCls}>ABA Account Number / ID</label>
-                    <input
-                      type="text"
-                      value={pMethods.abaAccountNumber || ''}
-                      onChange={e => setSettings({ ...settings, payment_methods: { ...pMethods, abaAccountNumber: e.target.value } })}
-                      className={inputCls}
-                      placeholder="e.g. 016 308 199"
-                    />
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className={labelCls}>Upload KHQR Image for Customer Payment Screen</label>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={async e => {
-                        const f = e.target.files[0];
-                        if (f) {
-                          const dataUrl = await fileToBase64(f, 800, 800, 0.85);
-                          setSettings({ ...settings, payment_methods: { ...pMethods, abaQrImage: dataUrl } });
-                        }
-                      }}
-                      className="w-full text-xs text-stone-500 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-white file:text-blue-700 file:border file:border-blue-200 cursor-pointer"
-                    />
-                    {pMethods.abaQrImage && (
-                      <div className="mt-3 flex items-center gap-4">
-                        <img src={pMethods.abaQrImage} alt="KHQR Preview" className="w-24 h-24 object-contain rounded-xl border border-blue-200 bg-white p-2 shadow-sm" />
-                        <button
-                          type="button"
-                          onClick={() => setSettings({ ...settings, payment_methods: { ...pMethods, abaQrImage: '' } })}
-                          className="text-xs font-bold text-red-600 hover:underline"
-                        >
-                          Remove QR
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className={`${cardCls} p-6`}>
-            <h3 className="font-bold text-lg text-stone-900 mb-6 pb-4 border-b border-stone-100"><i className="fa-solid fa-file-invoice mr-2 text-indigo-500"></i>Invoice Template & Receipt Notes</h3>
-            <div className="space-y-4 text-sm">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className={labelCls}>Invoice Header Title</label>
-                  <input
-                    type="text"
-                    value={invSettings.companyHeader || ''}
-                    onChange={e => setSettings({ ...settings, invoice_settings: { ...invSettings, companyHeader: e.target.value } })}
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>Tax / VAT Registration Number</label>
-                  <input
-                    type="text"
-                    value={invSettings.taxNumber || ''}
-                    onChange={e => setSettings({ ...settings, invoice_settings: { ...invSettings, taxNumber: e.target.value } })}
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-              <div>
-                <label className={labelCls}>Thank You / Customer Footer Note</label>
-                <input
-                  type="text"
-                  value={invSettings.footerNote || ''}
-                  onChange={e => setSettings({ ...settings, invoice_settings: { ...invSettings, footerNote: e.target.value } })}
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>Terms & Check-out Policies on Invoice</label>
-                <textarea
-                  rows="2"
-                  value={invSettings.terms || ''}
-                  onChange={e => setSettings({ ...settings, invoice_settings: { ...invSettings, terms: e.target.value } })}
-                  className={inputCls}
-                ></textarea>
-              </div>
-              <div className="pt-2">
-                <button onClick={saveSettings} className={btnPrimary}>{settingsSaved ? '✅ Saved!' : 'Save Invoice Template'}</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ───────────────────────────────────────────────────────────────────── */}
-      {/* 5. NOTIFICATIONS & ALERTS */}
-      {/* ───────────────────────────────────────────────────────────────────── */}
-      {subTab === 'notifications' && (
-        <div className="space-y-6">
-          <div className={`${cardCls} p-6`}>
-            <div className="flex items-center justify-between mb-6 pb-4 border-b border-stone-100">
-              <div>
-                <h3 className="font-bold text-lg text-stone-900"><i className="fa-brands fa-telegram mr-2 text-sky-500"></i>Staff Telegram Notifications</h3>
-                <p className="text-xs text-stone-500">ជូនដំណឹងពេលមានការកក់ថ្មី, ម៉ូតូដល់ពេលត្រូវដូរប្រេង, ឬភ្ញៀវត្រូវ Check-out</p>
-              </div>
-              <button onClick={saveSettings} className={btnPrimary}>{settingsSaved ? '✅ Saved!' : 'Save Notifications'}</button>
-            </div>
-
-            <div className="space-y-4 text-sm mb-6">
-              <div>
-                <label className={labelCls}>Telegram Bot Token</label>
-                <input
-                  type="text"
-                  value={settings.telegram_token || ''}
-                  onChange={e => setSettings({ ...settings, telegram_token: e.target.value })}
-                  className={inputCls}
-                  placeholder="1234567890:ABCdefGHI..."
-                />
-              </div>
-              <div>
-                <label className={labelCls}>Telegram Chat / Group ID</label>
-                <input
-                  type="text"
-                  value={settings.telegram_chat_id || ''}
-                  onChange={e => setSettings({ ...settings, telegram_chat_id: e.target.value })}
-                  className={inputCls}
-                  placeholder="-100123456789"
-                />
-              </div>
-              <div className="flex gap-3 pt-1">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    setTestResult('testing');
-                    const r = await fetch('/api/settings/test', authPost({}));
-                    const d = await r.json();
-                    setTestResult(d.success ? 'success' : `Failed: ${d.error}`);
-                  }}
-                  className={btnSecondary}
-                >
-                  {testResult === 'testing' ? '⏳ Sending...' : '🔔 Send Telegram Test Message'}
-                </button>
-              </div>
-              {testResult && testResult !== 'testing' && (
-                <div className={`p-3 rounded-xl text-sm font-medium ${testResult === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
-                  {testResult === 'success' ? '✅ Success! Test message received on Telegram.' : `❌ ${testResult}`}
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-3 pt-4 border-t border-stone-100">
-              <p className="text-xs font-bold text-stone-600 uppercase tracking-wider mb-2">Automated Alert Triggers</p>
-              {[
-                { key: 'telegramNewBooking', label: 'Instant alert when online booking is submitted' },
-                { key: 'telegramMaintenanceAlert', label: 'Fleet maintenance / oil change due reminder' },
-                { key: 'telegramCheckoutReminder', label: 'Daily morning guest check-out summary' },
-              ].map(item => (
-                <label key={item.key} className="flex items-center gap-3 cursor-pointer p-3 bg-stone-50 rounded-xl border border-stone-200">
-                  <input
-                    type="checkbox"
-                    checked={notifSettings[item.key] !== false}
-                    onChange={e => setSettings({ ...settings, notification_settings: { ...notifSettings, [item.key]: e.target.checked } })}
-                    className="w-4 h-4 accent-brand-500 rounded"
-                  />
-                  <span className="text-sm font-medium text-stone-800">{item.label}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <div className={`${cardCls} p-6`}>
-            <h3 className="font-bold text-lg text-stone-900 mb-6 pb-4 border-b border-stone-100"><i className="fa-solid fa-envelope-open-text mr-2 text-brand-500"></i>Automated Guest Communication Templates</h3>
-            <div className="space-y-5 text-sm">
-              <div>
-                <label className={labelCls}>Guest Booking Confirmation Voucher (WhatsApp / SMS)</label>
-                <textarea
-                  rows="3"
-                  value={notifSettings.guestVoucherTemplate || ''}
-                  onChange={e => setSettings({ ...settings, notification_settings: { ...notifSettings, guestVoucherTemplate: e.target.value } })}
-                  className={inputCls}
-                ></textarea>
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {['{guest_name}', '{item_name}', '{start_date}', '{end_date}'].map(tag => (
-                    <span key={tag} className="text-[11px] font-mono bg-stone-100 text-stone-600 px-2 py-0.5 rounded border border-stone-200">{tag}</span>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className={labelCls}>Pre-Arrival Check-in Reminder Template</label>
-                <textarea
-                  rows="3"
-                  value={notifSettings.guestReminderTemplate || ''}
-                  onChange={e => setSettings({ ...settings, notification_settings: { ...notifSettings, guestReminderTemplate: e.target.value } })}
-                  className={inputCls}
-                ></textarea>
-              </div>
-
-              <div className="pt-2">
-                <button onClick={saveSettings} className={btnPrimary}>{settingsSaved ? '✅ Saved!' : 'Save Notification Settings'}</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ───────────────────────────────────────────────────────────────────── */}
-      {/* 6. SECURITY, AUDIT LOGS & BACKUP */}
-      {/* ───────────────────────────────────────────────────────────────────── */}
-      {subTab === 'security' && (
-        <div className="space-y-6">
-          {/* Data Backup & Restore */}
-          <div className={`${cardCls} p-6`}>
-            <h3 className="font-bold text-lg text-stone-900 mb-2"><i className="fa-solid fa-database mr-2 text-emerald-600"></i>Database Backup & Disaster Recovery</h3>
-            <p className="text-xs text-stone-500 mb-6">ទាញយក Backup ទិន្នន័យទាំងអស់ (JSON) ឬ Restore ឡើងវិញពេលមានបញ្ហា</p>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
-              <div className="p-5 bg-emerald-50/60 rounded-2xl border border-emerald-200 flex flex-col justify-between">
-                <div>
-                  <h4 className="font-bold text-sm text-emerald-950 mb-1"><i className="fa-solid fa-download mr-1.5 text-emerald-600"></i> Export & Download Full Backup</h4>
-                  <p className="text-xs text-emerald-800/80 mb-4">Downloads a comprehensive JSON archive of all bookings, rooms, bikes, invoices, guests, and settings.</p>
-                </div>
-                <button onClick={handleDownloadBackup} disabled={backupLoading} className={`${btnPrimary} bg-emerald-600 hover:bg-emerald-700 w-fit`}>
-                  {backupLoading ? 'Generating Backup...' : 'Download JSON Backup'}
-                </button>
-              </div>
-
-              <div className="p-5 bg-amber-50/60 rounded-2xl border border-amber-200 flex flex-col justify-between">
-                <div>
-                  <h4 className="font-bold text-sm text-amber-950 mb-1"><i className="fa-solid fa-upload mr-1.5 text-amber-600"></i> Restore Database from Backup</h4>
-                  <p className="text-xs text-amber-800/80 mb-4">Upload a previously exported backup file to restore complete system records.</p>
-                </div>
-                <input
-                  type="file"
-                  accept=".json"
-                  onChange={handleRestoreFile}
-                  className="w-full text-xs text-stone-500 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-amber-600 file:text-white cursor-pointer"
-                />
-              </div>
-            </div>
-
-            {restoreMessage && (
-              <div className="p-4 rounded-xl text-sm font-medium bg-stone-900 text-white shadow-lg mb-4">
-                {restoreMessage}
-              </div>
-            )}
-          </div>
-
-          {/* System Security Policies */}
-          <div className={`${cardCls} p-6`}>
-            <div className="flex items-center justify-between mb-6 pb-4 border-b border-stone-100">
-              <div>
-                <h3 className="font-bold text-lg text-stone-900"><i className="fa-solid fa-shield-halved mr-2 text-purple-600"></i>Security & Session Policies</h3>
-                <p className="text-xs text-stone-500">កំណត់សុវត្ថិភាព Password និងរយៈពេល Session Timeout</p>
-              </div>
-              <button onClick={saveSettings} className={btnPrimary}>{settingsSaved ? '✅ Saved!' : 'Save Security'}</button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-sm">
-              <label className="flex items-center gap-3 cursor-pointer p-4 bg-stone-50 rounded-xl border border-stone-200">
-                <input
-                  type="checkbox"
-                  checked={secSettings.autoBackupEnabled !== false}
-                  onChange={e => setSettings({ ...settings, security_settings: { ...secSettings, autoBackupEnabled: e.target.checked } })}
-                  className="w-4 h-4 accent-brand-500 rounded"
-                />
-                <div>
-                  <p className="font-bold text-stone-900 text-sm">Automatic Daily Data Snapshot</p>
-                  <p className="text-xs text-stone-500">Keep automated system recovery points</p>
-                </div>
-              </label>
-
-              <label className="flex items-center gap-3 cursor-pointer p-4 bg-stone-50 rounded-xl border border-stone-200">
-                <input
-                  type="checkbox"
-                  checked={secSettings.requireStrongPasswords !== false}
-                  onChange={e => setSettings({ ...settings, security_settings: { ...secSettings, requireStrongPasswords: e.target.checked } })}
-                  className="w-4 h-4 accent-brand-500 rounded"
-                />
-                <div>
-                  <p className="font-bold text-stone-900 text-sm">Require Strong Staff Passwords</p>
-                  <p className="text-xs text-stone-500">Enforce minimum 6 characters for all roles</p>
-                </div>
-              </label>
-
-              <div>
-                <label className={labelCls}>Admin Session Timeout (Minutes)</label>
-                <input
-                  type="number"
-                  value={secSettings.sessionTimeoutMinutes || 120}
-                  onChange={e => setSettings({ ...settings, security_settings: { ...secSettings, sessionTimeoutMinutes: parseInt(e.target.value) } })}
-                  className={inputCls}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Audit Logs Trail */}
-          <div className={`${cardCls} overflow-hidden`}>
-            <div className="p-6 border-b border-stone-100 flex items-center justify-between">
-              <div>
-                <h3 className="font-bold text-lg text-stone-900"><i className="fa-solid fa-list-check mr-2 text-stone-700"></i>Activity Audit Trail</h3>
-                <p className="text-xs text-stone-500">ត្រួតពិនិត្យប្រវត្តិកែប្រែទិន្នន័យរបស់បុគ្គលិក (Activity History)</p>
-              </div>
-              <span className="text-xs font-bold bg-stone-100 text-stone-600 px-3 py-1 rounded-full">
-                {auditLogs.length} events logged
-              </span>
-            </div>
-
-            <div className="p-4 border-b border-stone-100 bg-stone-50">
-              <input
-                type="text"
-                value={auditSearch}
-                onChange={e => setAuditSearch(e.target.value)}
-                placeholder="Search audit trail by user, action, details..."
-                className={inputCls}
-              />
-            </div>
-
-            <div className="overflow-x-auto max-h-96">
-              <table className="w-full text-sm text-left">
-                <thead className="bg-stone-50 border-b border-stone-200 text-xs text-stone-500 uppercase tracking-widest sticky top-0">
-                  <tr>
-                    {['Timestamp', 'User', 'Action', 'Details'].map(h => (
-                      <th key={h} className="px-4 py-3 font-bold">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {auditLogs
-                    .filter(log => !auditSearch || log.action.toLowerCase().includes(auditSearch.toLowerCase()) || log.performedBy.toLowerCase().includes(auditSearch.toLowerCase()) || log.details?.toLowerCase().includes(auditSearch.toLowerCase()))
-                    .map(log => (
-                      <tr key={log.id} className="border-b border-stone-100 hover:bg-stone-50 text-xs">
-                        <td className="px-4 py-3 font-mono text-stone-400 whitespace-nowrap">{log.createdAt}</td>
-                        <td className="px-4 py-3 font-bold text-stone-900">{log.performedBy}</td>
-                        <td className="px-4 py-3">
-                          <span className="bg-stone-100 text-stone-700 font-bold px-2 py-0.5 rounded">
-                            {log.action}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-stone-600 max-w-xs truncate">{log.details || '—'}</td>
-                      </tr>
-                    ))}
-                  {auditLogs.length === 0 && (
-                    <tr><td colSpan="4" className="py-10 text-center text-stone-400 text-xs">No audit logs recorded yet.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DashboardTab({ bikes, models, rentals, bookings, cardCls, loadingData, currency }) {
+function DashboardTab({ bikes, models, rentals, bookings, rooms, cardCls, loadingData, currency, onNavigateTab, sendCategoryTelegramAlert, tgSending }) {
   const [modalState, setModalState] = useState({ open: false, title: '', type: '' });
+  const [recentFilter, setRecentFilter] = useState('all'); // 'all' | 'active' | 'returned' | 'overdue'
+  const [recentSort, setRecentSort] = useState('date-desc'); // 'date-desc' | 'date-asc' | 'name-asc' | 'name-desc' | 'price-desc' | 'price-asc'
+  const [recentSearch, setRecentSearch] = useState('');
+  const [recentLimit, setRecentLimit] = useState(6);
 
   if (loadingData) {
     return (
@@ -3669,7 +3477,66 @@ function DashboardTab({ bikes, models, rentals, bookings, cardCls, loadingData, 
     return m ? m.name : 'Motor';
   };
 
-  const displayRentals = (rentals || []).slice(0, 6);
+  const totalRecentCount = (rentals || []).length;
+  const activeRentalsCount = (rentals || []).filter(r => r.status === 'active' || r.status === 'rented').length;
+  const returnedRentalsCount = (rentals || []).filter(r => r.status === 'returned' || r.status === 'completed').length;
+  const overdueRentalsCount = overdueRentals.length;
+
+  const processedRentals = (rentals || []).filter(r => {
+    // Search filter
+    if (recentSearch.trim()) {
+      const q = recentSearch.toLowerCase().trim();
+      const cName = (r.guestName || r.customerName || '').toLowerCase();
+      const phone = (r.guestPhone || r.customerPhone || r.phone || '').toLowerCase();
+      const bName = (r.bikeName || r.motoName || '').toLowerCase();
+      const plate = (r.plateNumber || '').toLowerCase();
+      if (!cName.includes(q) && !phone.includes(q) && !bName.includes(q) && !plate.includes(q)) {
+        return false;
+      }
+    }
+
+    // Category / Status filter
+    if (recentFilter === 'active') {
+      return r.status === 'active' || r.status === 'rented';
+    }
+    if (recentFilter === 'returned') {
+      return r.status === 'returned' || r.status === 'completed';
+    }
+    if (recentFilter === 'overdue') {
+      return (r.status === 'active' || r.status === 'rented') && (r.endDate || r.returnDueDate) && (r.endDate || r.returnDueDate) < todayStr;
+    }
+    return true;
+  }).sort((a, b) => {
+    if (recentSort === 'date-desc') {
+      const da = new Date(a.startDate || a.checkoutDate || a.createdAt || 0).getTime();
+      const db = new Date(b.startDate || b.checkoutDate || b.createdAt || 0).getTime();
+      return db - da;
+    }
+    if (recentSort === 'date-asc') {
+      const da = new Date(a.startDate || a.checkoutDate || a.createdAt || 0).getTime();
+      const db = new Date(b.startDate || b.checkoutDate || b.createdAt || 0).getTime();
+      return da - db;
+    }
+    if (recentSort === 'name-asc') {
+      const na = (a.guestName || a.customerName || '').trim();
+      const nb = (b.guestName || b.customerName || '').trim();
+      return na.localeCompare(nb, 'km');
+    }
+    if (recentSort === 'name-desc') {
+      const na = (a.guestName || a.customerName || '').trim();
+      const nb = (b.guestName || b.customerName || '').trim();
+      return nb.localeCompare(na, 'km');
+    }
+    if (recentSort === 'price-desc') {
+      return (Number(b.totalPrice || b.totalFee || 0)) - (Number(a.totalPrice || a.totalFee || 0));
+    }
+    if (recentSort === 'price-asc') {
+      return (Number(a.totalPrice || a.totalFee || 0)) - (Number(b.totalPrice || b.totalFee || 0));
+    }
+    return 0;
+  });
+
+  const displayRentals = recentLimit === 'all' ? processedRentals : processedRentals.slice(0, Number(recentLimit));
 
   return (
     <div className="space-y-6 pb-12 text-stone-900">
@@ -3783,46 +3650,343 @@ function DashboardTab({ bikes, models, rentals, bookings, cardCls, loadingData, 
       )}
 
       {/* Recent Rentals Table */}
-      <div className={`${cardCls} overflow-hidden`}>
-        <div className="p-5 border-b border-stone-100 flex items-center justify-between">
-          <h3 className="font-bold text-stone-900 text-sm flex items-center gap-2">
-            <i className="fa-solid fa-clock-rotate-left text-brand-500"></i> ការជួលចុងក្រោយ (Recent Rentals)
-          </h3>
-          <span className="text-xs text-stone-400 font-medium">Showing latest {displayRentals.length} records</span>
+      <div className={`${cardCls} overflow-hidden shadow-sm`}>
+        {/* Card Header */}
+        <div className="p-5 border-b border-stone-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-brand-50 border border-brand-200 flex items-center justify-center text-brand-600 shadow-xs">
+              <i className="fa-solid fa-clock-rotate-left text-base"></i>
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-stone-900 text-base">ការជួលចុងក្រោយ (Recent Rentals)</h3>
+                <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-stone-100 text-stone-600">
+                  {displayRentals.length} / {processedRentals.length}
+                </span>
+              </div>
+              <p className="text-xs text-stone-400 mt-0.5">ប្រវត្តិជួលម៉ូតូចុងក្រោយពីទិន្នន័យ (Latest rental history records)</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {onNavigateTab && (
+              <button
+                type="button"
+                onClick={() => onNavigateTab('history')}
+                className="px-3.5 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              >
+                <span>មើលប្រវត្តិទាំងអស់ (View History)</span>
+                <i className="fa-solid fa-arrow-right text-[11px]"></i>
+              </button>
+            )}
+          </div>
         </div>
+
+        {/* Categories, Search & Sort Toolbar */}
+        <div className="p-4 bg-stone-50/70 border-b border-stone-100 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          {/* Category Filter Pills */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setRecentFilter('all')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                recentFilter === 'all'
+                  ? 'bg-stone-900 text-white shadow-xs'
+                  : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-100'
+              }`}
+            >
+              <span>ទាំងអស់ (All)</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${recentFilter === 'all' ? 'bg-white/20 text-white' : 'bg-stone-100 text-stone-500'}`}>
+                {totalRecentCount}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setRecentFilter('active')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                recentFilter === 'active'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-100'
+              }`}
+            >
+              <span className="w-2 h-2 rounded-full bg-blue-400"></span>
+              <span>កំពុងជួល (Active)</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${recentFilter === 'active' ? 'bg-white/20 text-white' : 'bg-blue-50 text-blue-700 font-bold'}`}>
+                {activeRentalsCount}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setRecentFilter('returned')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                recentFilter === 'returned'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-100'
+              }`}
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+              <span>ប្រគល់រួច (Returned)</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${recentFilter === 'returned' ? 'bg-white/20 text-white' : 'bg-emerald-50 text-emerald-700 font-bold'}`}>
+                {returnedRentalsCount}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setRecentFilter('overdue')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                recentFilter === 'overdue'
+                  ? 'bg-rose-600 text-white shadow-xs'
+                  : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-100'
+              }`}
+            >
+              <i className={`fa-solid fa-triangle-exclamation text-[10px] ${recentFilter === 'overdue' ? 'text-white' : 'text-rose-500'}`}></i>
+              <span>ហួសថ្ងៃ (Overdue)</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${recentFilter === 'overdue' ? 'bg-white/20 text-white' : overdueRentalsCount > 0 ? 'bg-rose-100 text-rose-700 font-bold' : 'bg-stone-100 text-stone-500'}`}>
+                {overdueRentalsCount}
+              </span>
+            </button>
+          </div>
+
+          {/* Search, Sort, Limit Controls */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Search Input */}
+            <div className="relative flex-1 sm:w-60 min-w-[200px]">
+              <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 text-xs"></i>
+              <input
+                type="text"
+                placeholder="ស្វែងរកឈ្មោះ, ម៉ូតូ, ស្លាកលេខ..."
+                value={recentSearch}
+                onChange={e => setRecentSearch(e.target.value)}
+                className="w-full bg-white border border-stone-200 rounded-xl pl-8 pr-7 py-1.5 text-xs text-stone-800 placeholder-stone-400 outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition shadow-2xs"
+              />
+              {recentSearch && (
+                <button
+                  type="button"
+                  onClick={() => setRecentSearch('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 text-xs w-4 h-4 flex items-center justify-center cursor-pointer"
+                >
+                  <i className="fa-solid fa-xmark"></i>
+                </button>
+              )}
+            </div>
+
+            {/* Sort Dropdown */}
+            <div className="relative">
+              <select
+                value={recentSort}
+                onChange={e => setRecentSort(e.target.value)}
+                className="bg-white border border-stone-200 rounded-xl px-3 py-1.5 text-xs font-bold text-stone-700 outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition cursor-pointer shadow-2xs"
+                title="តម្រៀបទិដ្ឋភាព (Sort view)"
+              >
+                <option value="date-desc">កាលបរិច្ឆេទ: ថ្មីមុន (Newest)</option>
+                <option value="date-asc">កាលបរិច្ឆេទ: ចាស់មុន (Oldest)</option>
+                <option value="name-asc">ឈ្មោះ: ក - អ (Name: A - Z)</option>
+                <option value="name-desc">ឈ្មោះ: អ - ក (Name: Z - A)</option>
+                <option value="price-desc">តម្លៃ: ខ្ពស់ទៅទាប (Price: High)</option>
+                <option value="price-asc">តម្លៃ: ទាបទៅខ្ពស់ (Price: Low)</option>
+              </select>
+            </div>
+
+            {/* Limit Selector */}
+            <div className="relative">
+              <select
+                value={recentLimit}
+                onChange={e => setRecentLimit(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+                className="bg-white border border-stone-200 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-stone-700 outline-none focus:border-brand-500 transition cursor-pointer shadow-2xs"
+                title="ចំនួនជួរ (Rows)"
+              >
+                <option value="6">6 ជួរ</option>
+                <option value="10">10 ជួរ</option>
+                <option value="20">20 ជួរ</option>
+                <option value="all">ទាំងអស់</option>
+              </select>
+            </div>
+
+            {/* Print & Alert to Telegram */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="px-2.5 py-1.5 bg-white hover:bg-stone-100 border border-stone-200 text-stone-700 text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                title="បោះពុម្ពបញ្ជីការជួល (Print Recent Rentals)"
+              >
+                <i className="fa-solid fa-print text-stone-600"></i>
+                <span className="hidden sm:inline">Print</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => sendCategoryTelegramAlert && sendCategoryTelegramAlert({
+                  category: 'Dashboard',
+                  title: 'Daily Operations & Recent Rentals Summary',
+                  summary: `Active Rentals: ${(rentals||[]).filter(r=>r.status==='active'||r.status==='rented').length} | Overdue: ${overdueRentals.length}\nAvailable Bikes: ${(bikes||[]).filter(b=>b.status==='available').length} | Vacant Rooms: ${(rooms||[]).filter(r=>r.status==='vacant').length}`,
+                  details: `Showing ${displayRentals.length} recent rentals on dashboard.`
+                })}
+                disabled={tgSending}
+                className="px-2.5 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-2xs disabled:opacity-50 cursor-pointer"
+                title="ផ្ញើរបាយការណ៍ Dashboard ទៅ Telegram"
+              >
+                <i className="fa-brands fa-telegram text-sky-500"></i>
+                <span className="hidden sm:inline">Alert Telegram</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Printable Report Header */}
+        <div className="print-only mb-4 p-4 border-b border-stone-300">
+          <h2 className="text-xl font-bold">Motorental Siemreab Angkor & Guesthouse</h2>
+          <p className="text-sm text-stone-700 font-semibold">Dashboard Recent Rentals & Activity Summary</p>
+          <p className="text-xs text-stone-500">Showing {displayRentals.length} of {processedRentals.length} records | Printed: {new Date().toLocaleString()}</p>
+        </div>
+
+        {/* Table */}
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left whitespace-nowrap">
-            <thead className="bg-stone-50 border-b border-stone-100 text-xs text-stone-500 uppercase tracking-wider font-bold">
+            <thead className="bg-stone-50 border-b border-stone-100 text-xs text-stone-500 uppercase tracking-wider font-bold select-none">
               <tr>
-                <th className="px-5 py-3">អតិថិជន (Customer)</th>
-                <th className="px-5 py-3">ម៉ូតូ (Bike)</th>
-                <th className="px-5 py-3">ថ្ងៃចេញ (Check Out)</th>
-                <th className="px-5 py-3">ថ្ងៃត្រឡប់ (Due Date)</th>
-                <th className="px-5 py-3">ស្ថានភាព (Status)</th>
+                <th
+                  onClick={() => setRecentSort(prev => prev === 'name-asc' ? 'name-desc' : 'name-asc')}
+                  className="px-5 py-3.5 cursor-pointer hover:bg-stone-100/70 transition"
+                  title="ចុចដើម្បីតម្រៀបតាមឈ្មោះ (Click to sort by customer name)"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span>អតិថិជន (Customer)</span>
+                    <i className={`fa-solid fa-sort text-[10px] ${recentSort.startsWith('name') ? 'text-brand-600' : 'text-stone-300'}`}></i>
+                  </div>
+                </th>
+                <th className="px-5 py-3.5">ម៉ូតូ (Bike / Plate)</th>
+                <th
+                  onClick={() => setRecentSort(prev => prev === 'date-desc' ? 'date-asc' : 'date-desc')}
+                  className="px-5 py-3.5 cursor-pointer hover:bg-stone-100/70 transition"
+                  title="ចុចដើម្បីតម្រៀបតាមកាលបរិច្ឆេទ (Click to sort by date)"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span>ថ្ងៃចេញ (Check Out)</span>
+                    <i className={`fa-solid fa-sort text-[10px] ${recentSort.startsWith('date') ? 'text-brand-600' : 'text-stone-300'}`}></i>
+                  </div>
+                </th>
+                <th className="px-5 py-3.5">ថ្ងៃត្រឡប់ (Due Date)</th>
+                <th
+                  onClick={() => setRecentSort(prev => prev === 'price-desc' ? 'price-asc' : 'price-desc')}
+                  className="px-5 py-3.5 cursor-pointer hover:bg-stone-100/70 transition text-right"
+                  title="ចុចដើម្បីតម្រៀបតាមតម្លៃ (Click to sort by price)"
+                >
+                  <div className="flex items-center justify-end gap-1.5">
+                    <span>តម្លៃសរុប (Total)</span>
+                    <i className={`fa-solid fa-sort text-[10px] ${recentSort.startsWith('price') ? 'text-brand-600' : 'text-stone-300'}`}></i>
+                  </div>
+                </th>
+                <th className="px-5 py-3.5 text-center">ស្ថានភាព (Status)</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-100 text-stone-700">
-              {displayRentals.map((r, i) => (
-                <tr key={r.id || i} className="hover:bg-stone-50 transition-colors">
-                  <td className="px-5 py-3.5 font-bold text-stone-900">{r.guestName || r.customerName || '—'}</td>
-                  <td className="px-5 py-3.5 font-semibold text-stone-800">
-                    <div>{r.bikeName || 'Motor'}</div>
-                    {r.plateNumber && <div className="text-[11px] font-mono text-stone-400">{r.plateNumber}</div>}
-                  </td>
-                  <td className="px-5 py-3.5 text-xs text-stone-600 font-mono">{r.startDate || r.checkoutDate || '—'}</td>
-                  <td className="px-5 py-3.5 text-xs text-stone-600 font-mono">{r.endDate || r.returnDueDate || '—'}</td>
-                  <td className="px-5 py-3.5">
-                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                      r.status === 'active' || r.status === 'rented' ? 'bg-blue-100 text-blue-700' : 'bg-stone-100 text-stone-600'
-                    }`}>
-                      {r.status || 'Active'}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+              {displayRentals.map((r, i) => {
+                const isAct = r.status === 'active' || r.status === 'rented';
+                const isRet = r.status === 'returned' || r.status === 'completed';
+                const isOverdue = isAct && (r.endDate || r.returnDueDate) && (r.endDate || r.returnDueDate) < todayStr;
+                const custName = r.guestName || r.customerName || 'Customer';
+                const initial = custName.trim().charAt(0).toUpperCase() || 'C';
+
+                return (
+                  <tr key={r.id || i} className="hover:bg-stone-50/80 transition-colors">
+                    <td className="px-5 py-3.5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-brand-100/70 text-brand-700 font-bold flex items-center justify-center text-xs shrink-0">
+                          {initial}
+                        </div>
+                        <div>
+                          <div className="font-bold text-stone-900 leading-snug">{custName}</div>
+                          {(r.guestPhone || r.customerPhone || r.phone) && (
+                            <div className="text-[11px] text-stone-400 flex items-center gap-1 font-mono">
+                              <i className="fa-solid fa-phone text-[9px]"></i>
+                              <span>{r.guestPhone || r.customerPhone || r.phone}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+
+                    <td className="px-5 py-3.5">
+                      <div>
+                        <div className="font-semibold text-stone-900 text-xs">{r.bikeName || 'Motorbike'}</div>
+                        {r.plateNumber ? (
+                          <span className="inline-block mt-0.5 px-2 py-0.5 bg-stone-100 border border-stone-200/80 rounded font-mono text-[10px] font-bold text-stone-600">
+                            {r.plateNumber}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-stone-400">គ្មានស្លាកលេខ</span>
+                        )}
+                      </div>
+                    </td>
+
+                    <td className="px-5 py-3.5 text-xs text-stone-600">
+                      <div className="flex items-center gap-1.5 font-mono">
+                        <i className="fa-regular fa-calendar text-stone-400 text-[11px]"></i>
+                        <span>{r.startDate || r.checkoutDate || '—'}</span>
+                      </div>
+                      {(r.timeOut || r.checkoutTime) && (
+                        <div className="text-[10px] text-stone-400 ml-4 font-mono">{r.timeOut || r.checkoutTime}</div>
+                      )}
+                    </td>
+
+                    <td className="px-5 py-3.5 text-xs">
+                      <div className={`flex items-center gap-1.5 font-mono ${isOverdue ? 'text-rose-600 font-bold' : 'text-stone-600'}`}>
+                        <i className={`fa-regular fa-calendar-check text-[11px] ${isOverdue ? 'text-rose-500' : 'text-stone-400'}`}></i>
+                        <span>{r.endDate || r.returnDueDate || '—'}</span>
+                      </div>
+                      {isOverdue && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-200/80 rounded px-1.5 py-0.2 mt-0.5">
+                          <i className="fa-solid fa-triangle-exclamation text-[9px]"></i> ហួសថ្ងៃ
+                        </span>
+                      )}
+                    </td>
+
+                    <td className="px-5 py-3.5 text-right font-mono font-bold text-stone-900 text-xs">
+                      ${parseFloat(r.totalPrice || r.totalFee || (Number(r.dailyRate || 15) * Number(r.totalDays || 1))).toFixed(2)}
+                    </td>
+
+                    <td className="px-5 py-3.5 text-center">
+                      <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider inline-flex items-center gap-1 ${
+                        isOverdue
+                          ? 'bg-rose-100 text-rose-700 border border-rose-200'
+                          : isAct
+                          ? 'bg-blue-100 text-blue-700 border border-blue-200'
+                          : isRet
+                          ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                          : 'bg-stone-100 text-stone-600 border border-stone-200'
+                      }`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${
+                          isOverdue ? 'bg-rose-500 animate-pulse' : isAct ? 'bg-blue-500' : isRet ? 'bg-emerald-500' : 'bg-stone-400'
+                        }`}></span>
+                        {isOverdue ? 'ហួសថ្ងៃ' : isAct ? 'កំពុងជួល' : isRet ? 'ប្រគល់រួច' : (r.status || 'Active')}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+
               {displayRentals.length === 0 && (
                 <tr>
-                  <td colSpan="5" className="p-8 text-center text-stone-400">មិនទាន់មានទិន្នន័យជួលនៅឡើយទេ។</td>
+                  <td colSpan="6" className="py-12 text-center text-stone-400">
+                    <div className="flex flex-col items-center justify-center gap-2">
+                      <div className="w-12 h-12 rounded-full bg-stone-100 flex items-center justify-center text-stone-400 text-lg">
+                        <i className="fa-solid fa-inbox"></i>
+                      </div>
+                      <p className="text-xs font-semibold text-stone-600">មិនមានទិន្នន័យជួលត្រូវនឹងការជ្រើសរើសទេ</p>
+                      {(recentSearch || recentFilter !== 'all') && (
+                        <button
+                          type="button"
+                          onClick={() => { setRecentSearch(''); setRecentFilter('all'); }}
+                          className="mt-1 text-xs font-bold text-brand-600 hover:text-brand-700 underline cursor-pointer"
+                        >
+                          កំណត់ឡើងវិញ (Clear Filters)
+                        </button>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               )}
             </tbody>
