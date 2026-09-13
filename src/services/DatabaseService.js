@@ -8,7 +8,7 @@ export class BaseModel {
     this.collectionRef = collection(db, collectionName);
   }
 
-  validate(data) {
+  validate(data, isUpdate = false) {
     return { valid: true, errors: [] };
   }
 
@@ -23,7 +23,7 @@ export class BaseModel {
   }
 
   async create(data) {
-    const { valid, errors } = this.validate(data);
+    const { valid, errors } = this.validate(data, false);
     if (!valid) throw new Error(errors.join(', '));
     const cleanData = { ...data, createdAt: data.createdAt || Date.now() };
     const docRef = await addDoc(this.collectionRef, cleanData);
@@ -31,7 +31,7 @@ export class BaseModel {
   }
 
   async update(id, data) {
-    const { valid, errors } = this.validate(data);
+    const { valid, errors } = this.validate(data, true);
     if (!valid) throw new Error(errors.join(', '));
     const docRef = doc(this.db, this.collectionName, String(id));
     const cleanData = { ...data, updatedAt: Date.now() };
@@ -80,7 +80,8 @@ export class BookingModel extends BaseModel {
     super(dbMotos, 'bookings');
   }
 
-  validate(data) {
+  validate(data, isUpdate = false) {
+    if (isUpdate) return { valid: true, errors: [] };
     const errors = [];
     if (!data.customerName && !data.name) errors.push("Customer name is required");
     return { valid: errors.length === 0, errors };
@@ -197,6 +198,11 @@ export async function syncBookingToOldSystem(booking) {
  */
 export async function syncRentalCheckoutToOldSystem(rental) {
   try {
+    const paymentType = rental.paymentType || rental.depositType || 'cash';
+    const paymentBy = rental.paymentBy || rental.paymentType || rental.depositType || 'Cash';
+    const staffName = rental.staffName || rental.resellStaff || 'Reception';
+    const resellStaff = rental.resellStaff || rental.staffName || '';
+
     const payload = {
       guestName: rental.guestName || '',
       customerName: rental.guestName || '',
@@ -204,22 +210,32 @@ export async function syncRentalCheckoutToOldSystem(rental) {
       customerPhone: rental.guestPhone || '',
       passportOrId: rental.guestDoc || '',
       motoId: rental.bikeId || rental.motoId || '',
+      bikeId: rental.bikeId || rental.motoId || '',
       motoName: rental.bikeName || '',
+      bikeName: rental.bikeName || '',
       plateNumber: rental.plateNumber || '',
       checkoutDate: rental.startDate || new Date().toISOString().split('T')[0],
+      startDate: rental.startDate || new Date().toISOString().split('T')[0],
       returnDueDate: rental.endDate || new Date().toISOString().split('T')[0],
+      endDate: rental.endDate || new Date().toISOString().split('T')[0],
       timeOut: rental.timeOut || '08:00',
       timeDue: rental.timeDue || '18:00',
       rentalType: rental.rentalType || 'full',
       extraHalfDay: Boolean(rental.extraHalfDay),
       dailyRate: Number(rental.dailyRate || 0),
       totalPrice: Number(rental.totalPrice || 0),
+      totalFee: Number(rental.totalPrice || 0),
       deposit: Number(rental.deposit || 0),
-      depositType: rental.depositType || 'cash',
+      depositType: rental.depositType || paymentType,
+      paymentType,
+      paymentBy,
       fuelOut: rental.fuelOut || 'Full',
       kmOut: Number(rental.kmOut || 0),
       helmets: Number(rental.helmets || 1),
-      staffName: rental.staffName || 'Admin',
+      staffName,
+      resellStaff,
+      note: rental.notes || rental.note || '',
+      notes: rental.notes || rental.note || '',
       status: 'active',
       createdAt: Date.now()
     };
@@ -227,40 +243,75 @@ export async function syncRentalCheckoutToOldSystem(rental) {
     const res = await RentalService.create(payload);
 
     // Also update moto status to 'rented' in chafe-2026
-    if (rental.bikeId) {
-      await MotoService.update(rental.bikeId, { status: 'rented' }).catch(() => {});
+    const motoId = rental.bikeId || rental.motoId;
+    if (motoId) {
+      await MotoService.update(motoId, { status: 'rented' }).catch(err => {
+        console.warn('Failed to update moto status to rented:', err);
+      });
     }
 
     console.log('Synced rental check-out to chafe-2026:', res.id);
     return res;
   } catch (e) {
     console.error('Failed to sync rental to chafe-2026:', e);
+    throw e;
   }
 }
 
 /**
  * Marks rental as returned and updates moto status back to 'available' in chafe-2026.
  */
-export async function syncRentalReturnToOldSystem(rentalId, motoId, returnData) {
+export async function syncRentalReturnToOldSystem(rentalId, motoId, returnData = {}) {
   try {
+    const returnDate = returnData.returnDate || new Date().toISOString().split('T')[0];
+    const returnTime = returnData.returnTime || new Date().toTimeString().slice(0, 5);
+    const returnKm = Number(returnData.returnKm || returnData.kilometerIn || 0);
+    const returnFuel = returnData.returnFuel || returnData.fuelIn || 'Full';
+    const lateFee = Number(returnData.lateFee || 0);
+    const damageFee = Number(returnData.damageFee || 0);
+    const returnPaymentType = returnData.paymentType || returnData.returnPaymentType || 'cash';
+    const staffName = returnData.staffName || returnData.returnStaff || '';
+
     if (rentalId) {
       await RentalService.update(rentalId, {
         status: 'returned',
-        returnDate: returnData.returnDate || new Date().toISOString().split('T')[0],
-        returnKm: Number(returnData.returnKm || 0),
-        returnFuel: returnData.returnFuel || 'Full',
-        lateFee: Number(returnData.lateFee || 0),
-        damageFee: Number(returnData.damageFee || 0),
+        returnDate,
+        returnTime,
+        returnKm,
+        returnFuel,
+        lateFee,
+        damageFee,
+        returnPaymentType,
+        returnStaff: staffName,
         returnedAt: Date.now()
-      }).catch(() => {});
+      }).catch(err => console.warn('RentalService.update return error:', err));
     }
 
     if (motoId) {
-      await MotoService.update(motoId, { status: 'available' }).catch(() => {});
+      await MotoService.update(motoId, { status: 'available' }).catch(err => {
+        console.warn('MotoService.update return error:', err);
+      });
     }
 
+    // Add entry in 'returns' collection to sync with motor.html
+    await ReturnService.create({
+      rentalId: String(rentalId || ''),
+      motoId: String(motoId || ''),
+      returnDate,
+      returnTime,
+      kilometerIn: returnKm,
+      fuelIn: returnFuel,
+      lateFee,
+      damageFee,
+      paymentType: returnPaymentType,
+      staffName,
+      createdAt: Date.now()
+    }).catch(err => console.warn('ReturnService.create error:', err));
+
     console.log('Synced rental return to chafe-2026 for rental:', rentalId);
+    return { success: true };
   } catch (e) {
     console.error('Failed to sync return to chafe-2026:', e);
+    throw e;
   }
 }

@@ -84,6 +84,16 @@ export function normalizeRental(r, customers = [], motos = [], models = []) {
   const totalPrice = Number(r.totalPrice || r.totalFee || (dailyRate * totalDays));
   const deposit = Number(r.deposit || 0);
 
+  const paymentType = r.paymentType || r.paymentMethod || r.depositType || 'cash';
+  const paymentBy = r.paymentBy || r.paymentType || r.paymentMethod || r.depositType || 'Cash';
+  const staffName = r.staffName || r.resellStaff || r.sellerName || r.staff || 'Reception';
+  const resellStaff = r.resellStaff || r.staffName || r.sellerName || r.staff || '';
+  const lateFee = Number(r.lateFee || 0);
+  const damageFee = Number(r.damageFee || 0);
+  const returnDate = toDateStr(r.returnDate || r.actualReturn || '');
+  const returnKm = Number(r.returnKm || r.kilometerIn || 0);
+  const returnFuel = r.returnFuel || r.fuelIn || 'Full';
+
   return {
     ...r,
     guestName,
@@ -105,6 +115,15 @@ export function normalizeRental(r, customers = [], motos = [], models = []) {
     totalPrice,
     totalFee: totalPrice,
     deposit,
+    paymentType,
+    paymentBy,
+    staffName,
+    resellStaff,
+    lateFee,
+    damageFee,
+    returnDate,
+    returnKm,
+    returnFuel,
     status: r.status || 'active'
   };
 }

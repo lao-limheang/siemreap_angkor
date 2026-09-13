@@ -7,6 +7,7 @@ export default function IncomeTab({
   rentals = [],
   setRentals,
   bikes = [],
+  staff = [],
   auth,
   fetchAll,
   cardCls = 'bg-white border border-stone-200 rounded-2xl shadow-sm',
@@ -20,6 +21,8 @@ export default function IncomeTab({
   const { showModal, showConfirm } = useModal();
   const [search, setSearch] = useState('');
   const [selectedBike, setSelectedBike] = useState('');
+  const [selectedPayment, setSelectedPayment] = useState('');
+  const [selectedStaff, setSelectedStaff] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [sortBy, setSortBy] = useState('date-desc');
@@ -28,20 +31,41 @@ export default function IncomeTab({
   const [editingRental, setEditingRental] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
 
+  // Extract unique staff names from rentals for filter dropdown
+  const staffOptions = useMemo(() => {
+    const set = new Set();
+    (rentals || []).forEach(r => {
+      const name = r.staffName || r.resellStaff || r.sellerName;
+      if (name && name.trim()) set.add(name.trim());
+    });
+    (staff || []).forEach(s => {
+      const name = s.fullName || s.username || s.name;
+      if (name && name.trim()) set.add(name.trim());
+    });
+    return Array.from(set);
+  }, [rentals, staff]);
+
   const filtered = useMemo(() => {
     const q = (search || '').toLowerCase().trim();
     const list = (rentals || []).filter(r => {
+      const pay = String(r.paymentBy || r.paymentType || r.depositType || '').toLowerCase();
+      const st = String(r.staffName || r.resellStaff || '').toLowerCase();
+
       const matchSearch =
         !q ||
         (r.guestName || r.customerName || '').toLowerCase().includes(q) ||
         (r.bikeName || '').toLowerCase().includes(q) ||
         (r.plateNumber || '').toLowerCase().includes(q) ||
-        (r.guestPhone || r.phone || '').toLowerCase().includes(q);
+        (r.guestPhone || r.phone || '').toLowerCase().includes(q) ||
+        pay.includes(q) ||
+        st.includes(q);
 
       const matchBike = !selectedBike || String(r.bikeId || r.motoId) === String(selectedBike);
+      const matchPayment = !selectedPayment || pay.includes(selectedPayment.toLowerCase());
+      const matchStaff = !selectedStaff || st === selectedStaff.toLowerCase();
       const matchFrom = !dateFrom || (r.startDate || r.checkoutDate) >= dateFrom;
       const matchTo = !dateTo || (r.startDate || r.checkoutDate) <= dateTo;
-      return matchSearch && matchBike && matchFrom && matchTo;
+      return matchSearch && matchBike && matchPayment && matchStaff && matchFrom && matchTo;
     });
 
     list.sort((a, b) => {
@@ -75,7 +99,7 @@ export default function IncomeTab({
     });
 
     return list;
-  }, [rentals, search, selectedBike, dateFrom, dateTo, sortBy]);
+  }, [rentals, search, selectedBike, selectedPayment, selectedStaff, dateFrom, dateTo, sortBy]);
 
   const paginated = useMemo(() => {
     const start = (page - 1) * pageSize;
@@ -100,12 +124,16 @@ export default function IncomeTab({
   }, [filtered]);
 
   const exportCSV = () => {
-    const headers = ['ID', 'Date', 'Customer', 'Bike', 'Rental Fee', 'Late Fee', 'Damage Fee', 'Total Income'];
+    const headers = ['ID', 'Date', 'Customer', 'Phone', 'Bike', 'Plate', 'Payment By', 'Staff Resell', 'Rental Fee', 'Late Fee', 'Damage Fee', 'Total Income'];
     const rows = filtered.map(r => [
       r.id,
       r.startDate || r.checkoutDate || '',
       `"${r.guestName || r.customerName || ''}"`,
+      `"${r.guestPhone || r.phone || ''}"`,
       `"${r.bikeName || ''}"`,
+      `"${r.plateNumber || ''}"`,
+      `"${(r.paymentBy || r.paymentType || r.depositType || 'Cash').toUpperCase()}"`,
+      `"${r.staffName || r.resellStaff || 'Reception'}"`,
       r.totalPrice || 0,
       r.lateFee || 0,
       r.damageFee || 0,
@@ -161,6 +189,10 @@ export default function IncomeTab({
       lateFee: parseFloat(rental.lateFee || 0),
       damageFee: parseFloat(rental.damageFee || 0),
       deposit: parseFloat(rental.deposit || 0),
+      paymentType: rental.paymentType || rental.depositType || 'cash',
+      paymentBy: rental.paymentBy || rental.paymentType || rental.depositType || 'Cash',
+      staffName: rental.staffName || rental.resellStaff || 'Reception',
+      resellStaff: rental.resellStaff || rental.staffName || 'Reception',
       status: rental.status || 'returned'
     });
   };
@@ -171,6 +203,10 @@ export default function IncomeTab({
     setIsSaving(true);
     try {
       const selectedB = bikes.find(b => String(b.id) === String(editingRental.bikeId));
+      const payType = editingRental.paymentType || 'cash';
+      const payBy = editingRental.paymentBy || payType;
+      const stName = editingRental.staffName || 'Reception';
+
       const updated = {
         ...editingRental,
         bikeName: selectedB ? selectedB.name : editingRental.bikeName || 'Motorbike',
@@ -178,7 +214,11 @@ export default function IncomeTab({
         totalPrice: Number(editingRental.totalPrice || 0),
         lateFee: Number(editingRental.lateFee || 0),
         damageFee: Number(editingRental.damageFee || 0),
-        deposit: Number(editingRental.deposit || 0)
+        deposit: Number(editingRental.deposit || 0),
+        paymentType: payType,
+        paymentBy: payBy,
+        staffName: stName,
+        resellStaff: stName
       };
 
       if (setRentals) {
@@ -205,6 +245,11 @@ export default function IncomeTab({
         lateFee: Number(updated.lateFee || 0),
         damageFee: Number(updated.damageFee || 0),
         deposit: Number(updated.deposit || 0),
+        paymentType: payType,
+        paymentBy: payBy,
+        depositType: payType,
+        staffName: stName,
+        resellStaff: stName,
         status: updated.status || 'returned',
         updatedAt: Date.now()
       };
@@ -275,6 +320,30 @@ export default function IncomeTab({
                 <option key={b.id} value={b.id}>{b.name} ({b.plateNumber || 'No Plate'})</option>
               ))}
             </select>
+            <select
+              value={selectedPayment}
+              onChange={e => { setSelectedPayment(e.target.value); setPage(1); }}
+              className={`${inputCls} w-auto text-xs py-2 font-medium`}
+              title="Filter by Payment Method"
+            >
+              <option value="">All Payments (គ្រប់វិធីបង់ប្រាក់)</option>
+              <option value="cash">💵 Cash</option>
+              <option value="aba">🏦 ABA Bank</option>
+              <option value="acleda">🏦 ACLEDA</option>
+              <option value="wing">📱 Wing</option>
+              <option value="other">💳 Other</option>
+            </select>
+            <select
+              value={selectedStaff}
+              onChange={e => { setSelectedStaff(e.target.value); setPage(1); }}
+              className={`${inputCls} w-auto text-xs py-2 font-medium`}
+              title="Filter by Staff Resell"
+            >
+              <option value="">All Staff (បុគ្គលិកទាំងអស់)</option>
+              {staffOptions.map(name => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
             <input
               type="date"
               value={dateFrom}
@@ -342,6 +411,8 @@ export default function IncomeTab({
                     <i className={`fa-solid fa-sort text-[10px] ${sortBy.startsWith('date') ? 'text-brand-600' : 'text-stone-300'}`}></i>
                   </div>
                 </th>
+                <th className="p-4">Payment By (បង់តាម)</th>
+                <th className="p-4">Staff Resell (បុគ្គលិកលក់)</th>
                 <th className="p-4">Rental Fee</th>
                 <th className="p-4">Late Fee</th>
                 <th className="p-4">Damage</th>
@@ -372,6 +443,39 @@ export default function IncomeTab({
                       <div className="text-[11px] font-mono text-stone-400">{r.plateNumber || ''}</div>
                     </td>
                     <td className="p-4 text-stone-600">{r.startDate || r.checkoutDate || '—'}</td>
+                    <td className="p-4">
+                      {(() => {
+                        const p = (r.paymentBy || r.paymentType || r.depositType || 'cash').toLowerCase();
+                        let badgeCls = 'bg-stone-100 text-stone-700 border-stone-200';
+                        let icon = 'fa-solid fa-money-bill-wave';
+                        let label = r.paymentBy || r.paymentType || r.depositType || 'Cash';
+                        if (p.includes('cash')) {
+                          badgeCls = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+                          icon = 'fa-solid fa-money-bill-wave';
+                        } else if (p.includes('aba')) {
+                          badgeCls = 'bg-cyan-50 text-cyan-700 border-cyan-200';
+                          icon = 'fa-solid fa-building-columns';
+                        } else if (p.includes('acleda')) {
+                          badgeCls = 'bg-blue-50 text-blue-700 border-blue-200';
+                          icon = 'fa-solid fa-credit-card';
+                        } else if (p.includes('wing')) {
+                          badgeCls = 'bg-lime-50 text-lime-800 border-lime-200';
+                          icon = 'fa-solid fa-mobile-screen-button';
+                        }
+                        return (
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider border ${badgeCls}`}>
+                            <i className={icon}></i>
+                            {label}
+                          </span>
+                        );
+                      })()}
+                    </td>
+                    <td className="p-4">
+                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-stone-100 border border-stone-200/80 text-stone-800 text-xs font-semibold">
+                        <i className="fa-solid fa-user-tag text-brand-500 text-[10px]"></i>
+                        <span>{r.staffName || r.resellStaff || r.sellerName || 'Reception'}</span>
+                      </div>
+                    </td>
                     <td className="p-4">${parseFloat(r.totalPrice || 0).toFixed(2)}</td>
                     <td className="p-4 text-amber-600">${parseFloat(r.lateFee || 0).toFixed(2)}</td>
                     <td className="p-4 text-rose-600">${parseFloat(r.damageFee || 0).toFixed(2)}</td>
@@ -400,7 +504,7 @@ export default function IncomeTab({
 
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan="8" className="p-12 text-center text-stone-400">
+                  <td colSpan="10" className="p-12 text-center text-stone-400">
                     No income records found for this period.
                   </td>
                 </tr>
@@ -549,6 +653,33 @@ export default function IncomeTab({
                     <option value="returned">Returned (រួចរាល់)</option>
                     <option value="active">Active (កំពុងជួល)</option>
                   </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Payment By (វិធីបង់ប្រាក់)</label>
+                  <select
+                    value={editingRental.paymentType || 'cash'}
+                    onChange={e => setEditingRental({ ...editingRental, paymentType: e.target.value, paymentBy: e.target.value })}
+                    className={inputCls}
+                  >
+                    <option value="cash">💵 Cash (សាច់ប្រាក់)</option>
+                    <option value="aba">🏦 ABA Bank</option>
+                    <option value="acleda">🏦 ACLEDA</option>
+                    <option value="wing">📱 Wing</option>
+                    <option value="other">💳 Other</option>
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>Staff Resell (បុគ្គលិកលក់)</label>
+                  <input
+                    type="text"
+                    value={editingRental.staffName || ''}
+                    onChange={e => setEditingRental({ ...editingRental, staffName: e.target.value, resellStaff: e.target.value })}
+                    className={inputCls}
+                    placeholder="e.g. Reception, Sokha..."
+                  />
                 </div>
               </div>
 

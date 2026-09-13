@@ -333,3 +333,18 @@ body {
   display: none;
 }
 
+/* ===== Mobile Safe Area & Touch Optimizations ===== */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* Touch targets & smooth mobile momentum scrolling */
+@media (max-width: 768px) {
+  aside nav, main {
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+

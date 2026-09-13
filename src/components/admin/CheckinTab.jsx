@@ -4,8 +4,11 @@ import { syncRentalReturnToOldSystem } from '../../services/DatabaseService';
 import PaginationControls from '../common/PaginationControls';
 
 export default function CheckinTab({
-  rentals,
-  bikes,
+  rentals = [],
+  setRentals,
+  bikes = [],
+  setBikes,
+  staff = [],
   auth,
   fetchAll,
   inputCls,
@@ -24,20 +27,23 @@ export default function CheckinTab({
   const [returnFuel, setReturnFuel] = useState('Full');
   const [lateFee, setLateFee] = useState('0');
   const [damageFee, setDamageFee] = useState('0');
+  const [returnPaymentType, setReturnPaymentType] = useState('cash');
+  const [returnStaff, setReturnStaff] = useState(auth?.user?.name || auth?.user?.fullName || 'Reception');
   const [processing, setProcessing] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const { showModal } = useModal();
 
   // Active rentals
-  const activeList = rentals.filter(r => r.status === 'active' || r.status === 'rented');
+  const activeList = (rentals || []).filter(r => r.status === 'active' || r.status === 'rented');
 
   const filtered = activeList.filter(r => {
     const q = search.toLowerCase();
     return (
       (r.guestName || '').toLowerCase().includes(q) ||
       (r.bikeName || '').toLowerCase().includes(q) ||
-      (r.plateNumber || '').toLowerCase().includes(q)
+      (r.plateNumber || '').toLowerCase().includes(q) ||
+      (r.guestPhone || '').toLowerCase().includes(q)
     );
   });
 
@@ -52,6 +58,8 @@ export default function CheckinTab({
     setReturnFuel('Full');
     setLateFee('0');
     setDamageFee('0');
+    setReturnPaymentType('cash');
+    setReturnStaff(auth?.user?.name || auth?.user?.fullName || r.staffName || 'Reception');
   };
 
   const handleReturnSubmit = async (e) => {
@@ -59,37 +67,78 @@ export default function CheckinTab({
     if (!selectedRental) return;
 
     setProcessing(true);
+    const late = parseFloat(lateFee) || 0;
+    const damage = parseFloat(damageFee) || 0;
+    const bikeId = selectedRental.bikeId || selectedRental.motoId;
+    const activeStaff = returnStaff || 'Reception';
+
+    const payload = {
+      returnDate: today(),
+      returnTime: new Date().toTimeString().slice(0, 5),
+      returnKm: Number(returnKm) || 0,
+      kilometerIn: Number(returnKm) || 0,
+      returnFuel,
+      fuelIn: returnFuel,
+      lateFee: late,
+      damageFee: damage,
+      paymentType: returnPaymentType,
+      returnPaymentType,
+      staffName: activeStaff,
+      returnStaff: activeStaff
+    };
+
     try {
-      const payload = {
-        returnDate: today(),
-        returnKm: Number(returnKm) || 0,
-        returnFuel,
-        lateFee: parseFloat(lateFee) || 0,
-        damageFee: parseFloat(damageFee) || 0
-      };
+      // 1. Primary update in Firestore live system
+      await syncRentalReturnToOldSystem(
+        selectedRental.id,
+        bikeId,
+        payload
+      );
 
-      const res = await fetch(`/api/rentals/${selectedRental.id}/return`, {
-        method: 'PATCH',
-        headers: auth.headers,
-        body: JSON.stringify(payload)
-      });
-
-      if (res.ok) {
-        // Realtime sync return to chafe-2026 (Live old system)
-        syncRentalReturnToOldSystem(
-          selectedRental.id,
-          selectedRental.bikeId || selectedRental.motoId,
-          payload
-        ).catch(console.error);
-
-        setSelectedRental(null);
-        fetchAll();
-      } else {
-        const data = await res.json().catch(() => ({}));
-        showModal('error', 'Check-in Error', data.error || 'Server error');
+      // 2. Immediate local state updates
+      if (setRentals) {
+        setRentals(prev => (prev || []).map(r => String(r.id) === String(selectedRental.id) ? {
+          ...r,
+          status: 'returned',
+          returnDate: payload.returnDate,
+          returnTime: payload.returnTime,
+          returnKm: payload.returnKm,
+          returnFuel: payload.returnFuel,
+          lateFee: late,
+          damageFee: damage,
+          returnPaymentType
+        } : r));
       }
+      if (setBikes && bikeId) {
+        setBikes(prev => (prev || []).map(b => String(b.id) === String(bikeId) ? { ...b, status: 'available' } : b));
+      }
+
+      // 3. Background sync to SQLite API (non-blocking)
+      fetch(`/api/rentals/${selectedRental.id}/return`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...(auth?.headers || {}) },
+        body: JSON.stringify({
+          ...payload,
+          guestName: selectedRental.guestName,
+          customerName: selectedRental.guestName,
+          phone: selectedRental.guestPhone || selectedRental.phone || '',
+          bikeName: selectedRental.bikeName,
+          plateNumber: selectedRental.plateNumber || '',
+          deposit: selectedRental.deposit || 0
+        })
+      }).catch(err => console.warn('SQLite return sync notice:', err));
+
+      showModal(
+        'success',
+        'Check-In Complete (ចូលម៉ូតូរួចរាល់)',
+        `Motor ${selectedRental.bikeName} successfully returned by ${selectedRental.guestName}. Available for new rental.`
+      );
+
+      setSelectedRental(null);
+      if (fetchAll) fetchAll();
     } catch (err) {
-      showModal('error', 'Error', err.message);
+      console.error('Check-in error:', err);
+      showModal('error', 'Check-in Error', err.message || 'Failed to process return');
     } finally {
       setProcessing(false);
     }
@@ -275,6 +324,59 @@ export default function CheckinTab({
                   />
                 </div>
               </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Payment By (វិធីទូទាត់)</label>
+                  <select
+                    value={returnPaymentType}
+                    onChange={e => setReturnPaymentType(e.target.value)}
+                    className={inputCls}
+                  >
+                    <option value="cash">💵 Cash (សាច់ប្រាក់)</option>
+                    <option value="aba">🏦 ABA Bank</option>
+                    <option value="acleda">🏦 ACLEDA</option>
+                    <option value="wing">📱 Wing</option>
+                    <option value="deposit_deduct">💰 Deduct from Deposit</option>
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>Receiving Staff (អ្នកទទួល)</label>
+                  <select
+                    value={returnStaff}
+                    onChange={e => setReturnStaff(e.target.value)}
+                    className={inputCls}
+                  >
+                    <option value="Reception">Reception</option>
+                    <option value="Admin">Admin</option>
+                    {staff.map(s => {
+                      const name = s.fullName || s.username || s.name;
+                      return <option key={s.id || name} value={name}>{name}</option>;
+                    })}
+                  </select>
+                </div>
+              </div>
+
+              {/* Balance Summary Box */}
+              {(() => {
+                const extra = (parseFloat(lateFee) || 0) + (parseFloat(damageFee) || 0);
+                const dep = parseFloat(selectedRental.deposit || 0);
+                const net = dep - extra;
+                return (
+                  <div className={`p-3 rounded-xl border text-xs font-semibold ${
+                    net >= 0 ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'
+                  }`}>
+                    <div className="flex justify-between">
+                      <span>Total Extra Fines:</span>
+                      <span className="font-bold">${extra.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between pt-1 border-t border-current/20 mt-1 font-bold">
+                      <span>{net >= 0 ? 'Deposit Refund to Guest:' : 'Guest to Pay Extra:'}</span>
+                      <span>${Math.abs(net).toFixed(2)}</span>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="pt-2 flex gap-2">
                 <button

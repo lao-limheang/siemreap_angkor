@@ -70,6 +70,8 @@ export default function SettingsTab({
 
   // Template active tab
   const [activeTemplateType, setActiveTemplateType] = useState('rental');
+  const [testingTemplate, setTestingTemplate] = useState(false);
+  const [testResultMsg, setTestResultMsg] = useState(null);
   const templateTextareaRef = useRef(null);
 
   // Password visibility for Telegram Token
@@ -104,9 +106,10 @@ export default function SettingsTab({
   // Telegram settings
   const currentTgToken = tgSet.botToken || settings.telegram_token || '';
   const currentTgChatId = tgSet.chatId || settings.telegram_chat_id || '';
-  const currentRentalTemplate = tgSet.rentalAlertTemplate || '<b>[ការជួលថ្មី / New Rental]</b>\nអតិថិជន: {customer_name}\nទូរស័ព្ទ: {phone}\nម៉ូតូ: {bike_model} ({plate_number})\nរយៈពេល: {start_date} ដល់ {end_date}\nសរុប: ${total_amount}';
-  const currentReturnTemplate = tgSet.returnAlertTemplate || '<b>[ការប្រគល់ម៉ូតូវិញ / Bike Returned]</b>\nអតិថិជន: {customer_name}\nម៉ូតូ: {bike_model} ({plate_number})\nថ្ងៃត្រឡប់: {return_date}\nប្រាក់តម្កល់បានប្រគល់: ${deposit_returned}';
-  const currentRevenueTemplate = tgSet.revenueAlertTemplate || '<b>[ចំណូលទទួលបាន / Payment Received]</b>\nវិក្កយបត្រ: #{invoice_id}\nអតិថិជន: {customer_name}\nចំនួនទឹកប្រាក់: ${amount}\nវិធីទូទាត់: {payment_method}';
+  const currentRentalTemplate = tgSet.rentalAlertTemplate || tgSet.checkoutAlertTemplate || '🛵 <b>[ការចេញដំណើរ / CHECK-OUT ALERT]</b>\n\n👤 អតិថិជន: <b>{customer_name}</b>\n📞 ទូរស័ព្ទ: {phone}\n🏍️ យានយន្ត/បន្ទប់: <b>{bike_model}</b> ({plate_number})\n📅 កាលបរិច្ឆេទ: {start_date} ដល់ {end_date}\n💰 តម្លៃសរុប: ${total_amount} | ប្រាក់កក់: ${deposit}\n💳 បង់ប្រាក់: {payment_method}\n👨‍💼 បុគ្គលិក: {staff_name}\n🕒 ម៉ោង: {time}';
+  const currentReturnTemplate = tgSet.returnAlertTemplate || tgSet.checkinAlertTemplate || '🏁 <b>[ការប្រគល់ត្រឡប់ / CHECK-IN & RETURN ALERT]</b>\n\n👤 អតិថិជន: <b>{customer_name}</b>\n🏍️ យានយន្ត/បន្ទប់: <b>{bike_model}</b> ({plate_number})\n📅 ថ្ងៃត្រឡប់: {return_date}\n💵 ថ្លៃយឺត: ${late_fee} | ថ្លៃខូចខាត: ${damage_fee}\n✅ ប្រាក់តម្កល់បានប្រគល់: ${deposit_returned}\n👨‍💼 បុគ្គលិកទទួល: {staff_name}\n🕒 ម៉ោង: {time}';
+  const currentBookingTemplate = tgSet.bookingAlertTemplate || '🔔 <b>[ការកក់ថ្មី / NEW BOOKING ALERT]</b>\n\n🔖 លេខកក់: <code>{booking_ref}</code>\n🏷️ ប្រភេទ: <b>{type}</b>\n📌 ព័ត៌មាន: <b>{item_name}</b>\n👤 អតិថិជន: <b>{customer_name}</b>\n📞 ទូរស័ព្ទ: {phone}\n📅 កាលបរិច្ឆេទ: {start_date} ដល់ {end_date}\n💰 តម្លៃប៉ាន់ស្មាន: ${total_amount}\n🕒 ម៉ោង: {time}';
+  const currentRevenueTemplate = tgSet.revenueAlertTemplate || '💰 <b>[ចំណូលទទួលបាន / Payment Received]</b>\n\nវិក្កយបត្រ: #{invoice_id}\nអតិថិជន: {customer_name}\nចំនួនទឹកប្រាក់: ${amount}\nវិធីទូទាត់: {payment_method}\n🕒 ម៉ោង: {time}';
 
   // Apply theme color dynamically to document styles
   const applyThemeColor = (hex, presetName = 'Custom') => {
@@ -171,12 +174,15 @@ export default function SettingsTab({
   const handleInsertTag = (tag) => {
     let currentText = '';
     let updateField = '';
-    if (activeTemplateType === 'rental') {
+    if (activeTemplateType === 'rental' || activeTemplateType === 'checkout') {
       currentText = currentRentalTemplate;
       updateField = 'rentalAlertTemplate';
-    } else if (activeTemplateType === 'return') {
+    } else if (activeTemplateType === 'return' || activeTemplateType === 'checkin') {
       currentText = currentReturnTemplate;
       updateField = 'returnAlertTemplate';
+    } else if (activeTemplateType === 'booking') {
+      currentText = currentBookingTemplate;
+      updateField = 'bookingAlertTemplate';
     } else {
       currentText = currentRevenueTemplate;
       updateField = 'revenueAlertTemplate';
@@ -185,8 +191,8 @@ export default function SettingsTab({
     const textarea = templateTextareaRef.current;
     let newText = '';
     if (textarea) {
-      const start = textarea.selectionStart || currentText.length;
-      const end = textarea.selectionEnd || currentText.length;
+      const start = textarea.selectionStart ?? currentText.length;
+      const end = textarea.selectionEnd ?? currentText.length;
       newText = currentText.substring(0, start) + tag + currentText.substring(end);
     } else {
       newText = currentText + ' ' + tag;
@@ -196,9 +202,47 @@ export default function SettingsTab({
       ...prev,
       telegram_settings: {
         ...(prev.telegram_settings || {}),
-        [updateField]: newText
+        [updateField]: newText,
+        ...(updateField === 'rentalAlertTemplate' ? { checkoutAlertTemplate: newText } : {}),
+        ...(updateField === 'returnAlertTemplate' ? { checkinAlertTemplate: newText } : {})
       }
     }));
+  };
+
+  // Test current template directly on Telegram
+  const handleTestCurrentTemplate = async () => {
+    setTestingTemplate(true);
+    setTestResultMsg(null);
+    try {
+      const activeTemplate =
+        (activeTemplateType === 'rental' || activeTemplateType === 'checkout')
+          ? currentRentalTemplate
+          : (activeTemplateType === 'return' || activeTemplateType === 'checkin')
+          ? currentReturnTemplate
+          : activeTemplateType === 'booking'
+          ? currentBookingTemplate
+          : currentRevenueTemplate;
+
+      const res = await fetch('/api/telegram/test-template', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(auth?.headers || {}) },
+        body: JSON.stringify({
+          type: activeTemplateType,
+          template: activeTemplate
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setTestResultMsg({ type: 'success', text: 'Telegram alert preview successfully delivered to your channel/group!' });
+      } else {
+        setTestResultMsg({ type: 'error', text: data.error || 'Failed to send alert. Check Bot Token & Chat ID.' });
+      }
+    } catch (e) {
+      setTestResultMsg({ type: 'error', text: e.message });
+    } finally {
+      setTestingTemplate(false);
+      setTimeout(() => setTestResultMsg(null), 6000);
+    }
   };
 
   // Comprehensive Save All Handler
@@ -234,8 +278,14 @@ export default function SettingsTab({
         telegram_settings: {
           botToken: currentTgToken,
           chatId: currentTgChatId,
+          checkoutAlertEnabled: tgSet.checkoutAlertEnabled !== false,
+          checkinAlertEnabled: tgSet.checkinAlertEnabled !== false,
+          bookingAlertEnabled: tgSet.bookingAlertEnabled !== false,
           rentalAlertTemplate: currentRentalTemplate,
+          checkoutAlertTemplate: currentRentalTemplate,
           returnAlertTemplate: currentReturnTemplate,
+          checkinAlertTemplate: currentReturnTemplate,
+          bookingAlertTemplate: currentBookingTemplate,
           revenueAlertTemplate: currentRevenueTemplate
         },
         notification_settings: {
@@ -1091,29 +1141,88 @@ export default function SettingsTab({
               </div>
             </div>
 
-            {/* Custom Alert Templates */}
+            {/* Automated Alert Toggles */}
             <div className="mt-8 pt-6 border-t border-stone-200">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                <div>
+                  <h4 className="font-bold text-sm text-stone-900 flex items-center gap-2">
+                    <i className="fa-solid fa-bell text-amber-500"></i>
+                    Automated Telegram Alerts (ការជូនដំណឹងស្វ័យប្រវត្តិ)
+                  </h4>
+                  <p className="text-xs text-stone-500">ជ្រើសរើសប្រភេទប្រតិបត្តិការដែលត្រូវផ្ញើដំណឹងស្វ័យប្រវត្តិតាម Telegram</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6 p-4 bg-stone-50 rounded-2xl border border-stone-200">
+                <label className="flex items-center gap-2.5 text-xs font-bold text-stone-800 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={tgSet.checkoutAlertEnabled !== false}
+                    onChange={e => setSettings(prev => ({
+                      ...prev,
+                      telegram_settings: { ...(prev.telegram_settings || {}), checkoutAlertEnabled: e.target.checked }
+                    }))}
+                    className="rounded text-brand-500 focus:ring-brand-500 h-4 w-4"
+                  />
+                  <span className="flex items-center gap-1.5">
+                    <i className="fa-solid fa-clipboard-check text-blue-500"></i> Check-Out Alert (ចេញ)
+                  </span>
+                </label>
+
+                <label className="flex items-center gap-2.5 text-xs font-bold text-stone-800 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={tgSet.checkinAlertEnabled !== false}
+                    onChange={e => setSettings(prev => ({
+                      ...prev,
+                      telegram_settings: { ...(prev.telegram_settings || {}), checkinAlertEnabled: e.target.checked }
+                    }))}
+                    className="rounded text-brand-500 focus:ring-brand-500 h-4 w-4"
+                  />
+                  <span className="flex items-center gap-1.5">
+                    <i className="fa-solid fa-rotate-left text-emerald-500"></i> Check-In / Return (ចូល)
+                  </span>
+                </label>
+
+                <label className="flex items-center gap-2.5 text-xs font-bold text-stone-800 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={tgSet.bookingAlertEnabled !== false}
+                    onChange={e => setSettings(prev => ({
+                      ...prev,
+                      telegram_settings: { ...(prev.telegram_settings || {}), bookingAlertEnabled: e.target.checked }
+                    }))}
+                    className="rounded text-brand-500 focus:ring-brand-500 h-4 w-4"
+                  />
+                  <span className="flex items-center gap-1.5">
+                    <i className="fa-solid fa-calendar-check text-purple-500"></i> Booking Alert (ការកក់)
+                  </span>
+                </label>
+              </div>
+
+              {/* Custom Alert Templates */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
                 <div>
                   <h4 className="font-bold text-sm text-stone-900 flex items-center gap-2">
                     <i className="fa-solid fa-file-code text-blue-600"></i>
                     Custom Alert Templates (កែសម្រួលទម្រង់សារជូនដំណឹង)
                   </h4>
-                  <p className="text-xs text-stone-500">អ្នកអាចកំណត់ទម្រង់ពាក្យ និង Tags ស្វ័យប្រវត្តិតាមតម្រូវការ</p>
+                  <p className="text-xs text-stone-500">អ្នកអាចកំណត់ពាក្យ ភាសា និង Dynamic Tags តាមតម្រូវការ</p>
                 </div>
 
                 {/* Subtabs for Templates */}
-                <div className="flex gap-1.5 bg-stone-100 p-1 rounded-xl">
+                <div className="flex flex-wrap gap-1.5 bg-stone-100 p-1 rounded-xl">
                   {[
-                    { id: 'rental', label: 'New Rental', icon: 'fa-motorcycle' },
-                    { id: 'return', label: 'Vehicle Return', icon: 'fa-rotate-left' },
-                    { id: 'revenue', label: 'Payment / Income', icon: 'fa-file-invoice-dollar' },
+                    { id: 'rental', label: 'Check-Out Alert (ចេញ)', icon: 'fa-clipboard-check' },
+                    { id: 'return', label: 'Check-In / Return (ចូល)', icon: 'fa-rotate-left' },
+                    { id: 'booking', label: 'Booking Alert (ការកក់)', icon: 'fa-calendar-check' },
+                    { id: 'revenue', label: 'Payment / Income (ចំណូល)', icon: 'fa-file-invoice-dollar' },
                   ].map(t => (
                     <button
                       key={t.id}
                       type="button"
                       onClick={() => setActiveTemplateType(t.id)}
-                      className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                         activeTemplateType === t.id ? 'bg-white text-stone-900 shadow-xs' : 'text-stone-500 hover:text-stone-800'
                       }`}
                     >
@@ -1125,21 +1234,25 @@ export default function SettingsTab({
               </div>
 
               {/* Tag Insertion Buttons */}
-              <div className="mb-3 bg-stone-50 p-3 rounded-xl border border-stone-200">
-                <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block mb-1.5">
-                  Available Dynamic Placeholders (ចុចដើម្បីបញ្ចូល Tag):
+              <div className="mb-3 bg-stone-50 p-3.5 rounded-2xl border border-stone-200">
+                <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block mb-2">
+                  Available Placeholders for {activeTemplateType.toUpperCase()} (ចុចដើម្បីបញ្ចូល Tag ទៅក្នុងទម្រង់សារ):
                 </span>
                 <div className="flex flex-wrap gap-1.5">
-                  {[
-                    '{customer_name}', '{phone}', '{bike_model}', '{plate_number}',
-                    '{start_date}', '{end_date}', '{total_amount}', '{return_date}',
-                    '{deposit_returned}', '{invoice_id}', '{amount}', '{payment_method}'
-                  ].map(tag => (
+                  {(
+                    activeTemplateType === 'booking'
+                      ? ['{booking_ref}', '{type}', '{item_name}', '{customer_name}', '{phone}', '{start_date}', '{end_date}', '{total_amount}', '{deposit}', '{notes}', '{time}']
+                      : (activeTemplateType === 'return' || activeTemplateType === 'checkin')
+                      ? ['{customer_name}', '{phone}', '{bike_model}', '{plate_number}', '{item_name}', '{return_date}', '{late_fee}', '{damage_fee}', '{deposit_returned}', '{staff_name}', '{time}']
+                      : activeTemplateType === 'revenue'
+                      ? ['{invoice_id}', '{customer_name}', '{amount}', '{payment_method}', '{time}']
+                      : ['{customer_name}', '{phone}', '{bike_model}', '{plate_number}', '{item_name}', '{start_date}', '{end_date}', '{total_amount}', '{deposit}', '{payment_method}', '{staff_name}', '{time}']
+                  ).map(tag => (
                     <button
                       key={tag}
                       type="button"
                       onClick={() => handleInsertTag(tag)}
-                      className="text-[11px] font-mono font-semibold bg-white hover:bg-blue-50 hover:text-blue-700 text-stone-700 px-2 py-1 rounded-lg border border-stone-200 transition-colors shadow-2xs"
+                      className="text-[11px] font-mono font-semibold bg-white hover:bg-brand-50 hover:text-brand-700 text-stone-700 px-2 py-1 rounded-lg border border-stone-200 transition-colors shadow-2xs cursor-pointer"
                     >
                       + {tag}
                     </button>
@@ -1147,34 +1260,63 @@ export default function SettingsTab({
                 </div>
               </div>
 
-              {/* Template Editor */}
+              {/* Template Editor & Preview */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                <div>
+                <div className="space-y-3">
                   <textarea
                     ref={templateTextareaRef}
-                    rows={6}
+                    rows={8}
                     value={
-                      activeTemplateType === 'rental'
+                      activeTemplateType === 'rental' || activeTemplateType === 'checkout'
                         ? currentRentalTemplate
-                        : activeTemplateType === 'return'
+                        : activeTemplateType === 'return' || activeTemplateType === 'checkin'
                         ? currentReturnTemplate
+                        : activeTemplateType === 'booking'
+                        ? currentBookingTemplate
                         : currentRevenueTemplate
                     }
                     onChange={e => {
                       const val = e.target.value;
-                      const field = activeTemplateType === 'rental'
-                        ? 'rentalAlertTemplate'
-                        : activeTemplateType === 'return'
-                        ? 'returnAlertTemplate'
-                        : 'revenueAlertTemplate';
+                      const field =
+                        activeTemplateType === 'rental' || activeTemplateType === 'checkout'
+                          ? 'rentalAlertTemplate'
+                          : activeTemplateType === 'return' || activeTemplateType === 'checkin'
+                          ? 'returnAlertTemplate'
+                          : activeTemplateType === 'booking'
+                          ? 'bookingAlertTemplate'
+                          : 'revenueAlertTemplate';
                       setSettings(prev => ({
                         ...prev,
-                        telegram_settings: { ...(prev.telegram_settings || {}), [field]: val }
+                        telegram_settings: {
+                          ...(prev.telegram_settings || {}),
+                          [field]: val,
+                          ...(field === 'rentalAlertTemplate' ? { checkoutAlertTemplate: val } : {}),
+                          ...(field === 'returnAlertTemplate' ? { checkinAlertTemplate: val } : {})
+                        }
                       }));
                     }}
                     className={`${inputCls} font-mono text-xs`}
-                    placeholder="Enter message template using HTML (<b>...</b>) and dynamic tags..."
+                    placeholder="Enter message template using HTML (<b>...</b>, <i>...</i>, <code>...</code>) and dynamic tags..."
                   ></textarea>
+
+                  <div className="flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={handleTestCurrentTemplate}
+                      disabled={testingTemplate}
+                      className="px-3.5 py-2 bg-sky-500 hover:bg-sky-600 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs disabled:opacity-50 cursor-pointer"
+                    >
+                      <i className={`fa-brands fa-telegram ${testingTemplate ? 'animate-bounce' : ''}`}></i>
+                      <span>{testingTemplate ? 'Sending Test...' : 'Test This Template on Telegram'}</span>
+                    </button>
+
+                    {testResultMsg && (
+                      <span className={`text-xs font-bold flex items-center gap-1.5 ${testResultMsg.type === 'success' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        <i className={`fa-solid ${testResultMsg.type === 'success' ? 'fa-circle-check' : 'fa-circle-exclamation'}`}></i>
+                        <span>{testResultMsg.text}</span>
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Telegram Message Preview Simulation */}
@@ -1182,7 +1324,8 @@ export default function SettingsTab({
                   <div>
                     <div className="flex items-center justify-between pb-2 mb-2.5 border-b border-slate-700 text-slate-400 text-[11px]">
                       <span className="flex items-center gap-1.5">
-                        <i className="fa-brands fa-telegram text-sky-400"></i> Telegram Alert Preview
+                        <i className="fa-brands fa-telegram text-sky-400"></i>
+                        <span>Telegram Alert Live Preview ({activeTemplateType.toUpperCase()})</span>
                       </span>
                       <span className="text-[10px]">Just now</span>
                     </div>
@@ -1190,24 +1333,37 @@ export default function SettingsTab({
                     <div
                       className="whitespace-pre-wrap leading-relaxed text-slate-100"
                       dangerouslySetInnerHTML={{
-                        __html: (activeTemplateType === 'rental'
-                          ? currentRentalTemplate
-                          : activeTemplateType === 'return'
-                          ? currentReturnTemplate
-                          : currentRevenueTemplate
+                        __html: (
+                          activeTemplateType === 'rental' || activeTemplateType === 'checkout'
+                            ? currentRentalTemplate
+                            : activeTemplateType === 'return' || activeTemplateType === 'checkin'
+                            ? currentReturnTemplate
+                            : activeTemplateType === 'booking'
+                            ? currentBookingTemplate
+                            : currentRevenueTemplate
                         )
-                          .replace('{customer_name}', 'John Doe')
-                          .replace('{phone}', '+855 12 345 678')
-                          .replace('{bike_model}', 'Honda Scoopy 2024')
-                          .replace('{plate_number}', '1AB-2345')
-                          .replace('{start_date}', '2026-09-07')
-                          .replace('{end_date}', '2026-09-10')
-                          .replace('{total_amount}', '36.00')
-                          .replace('{return_date}', '2026-09-10')
-                          .replace('{deposit_returned}', '50.00')
-                          .replace('{invoice_id}', 'INV-9021')
-                          .replace('{amount}', '36.00')
-                          .replace('{payment_method}', 'ABA KHQR')
+                          .replace(/{booking_ref}/gi, 'SR-BK-88421')
+                          .replace(/{type}/gi, 'Motor Rental (ជួលម៉ូតូ)')
+                          .replace(/{item_name}/gi, 'Honda Scoopy 2024')
+                          .replace(/{customer_name}/gi, 'John Doe')
+                          .replace(/{phone}/gi, '+855 12 345 678')
+                          .replace(/{bike_model}/gi, 'Honda Scoopy 2024')
+                          .replace(/{plate_number}/gi, '1AB-2345')
+                          .replace(/{room_name}/gi, 'Deluxe Room #101')
+                          .replace(/{start_date}/gi, '2026-09-13')
+                          .replace(/{end_date}/gi, '2026-09-16')
+                          .replace(/{total_amount}/gi, '45.00')
+                          .replace(/{deposit}/gi, '50.00')
+                          .replace(/{return_date}/gi, '2026-09-16')
+                          .replace(/{late_fee}/gi, '0.00')
+                          .replace(/{damage_fee}/gi, '0.00')
+                          .replace(/{deposit_returned}/gi, '50.00')
+                          .replace(/{payment_method}/gi, 'ABA KHQR')
+                          .replace(/{staff_name}/gi, 'Admin / Reception')
+                          .replace(/{notes}/gi, 'Customer requested helmet')
+                          .replace(/{invoice_id}/gi, 'INV-9021')
+                          .replace(/{amount}/gi, '45.00')
+                          .replace(/{time}/gi, '13:00, 13/09/2026')
                       }}
                     />
                   </div>

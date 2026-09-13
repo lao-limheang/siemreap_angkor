@@ -38,6 +38,7 @@ import BookingStockTab from './admin/BookingStockTab';
 import RoomsTab from './admin/RoomsTab';
 import RoomBookingsTab from './admin/RoomBookingsTab';
 import SettingsTab from './admin/SettingsTab';
+import ReportsTab from './admin/ReportsTab';
 import { normalizeRental, normalizeBooking, normalizeRoom, normalizeMoto, normalizeModel, normalizeBedCategory, asArray, toDateStr } from '../utils/dataNormalizer';
 import { fileToBase64 } from '../utils/imageUtils';
 import PaginationControls from './common/PaginationControls';
@@ -122,6 +123,8 @@ export default function Admin() {
   const [isLiveConnected, setIsLiveConnected] = useState(false);
   const [loadingData, setLoadingData] = useState(true);
   const [loadingReports, setLoadingReports] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [navSearch, setNavSearch] = useState('');
 
   // data stores
   const [dashStats,   setDashStats]   = useState(null);
@@ -155,7 +158,7 @@ export default function Admin() {
     security_settings: { autoBackupEnabled: true, backupFrequency: 'daily', requireStrongPasswords: true, sessionTimeoutMinutes: 120 },
     shop_settings: { shopName: 'Motorental Siemreab Angkor', logo: '/assets/logo.png', rentalHoursPerDay: 12, operatingHoursOpen: '06:00 AM', operatingHoursClose: '10:00 PM', depositDocTypes: "National ID, Passport, Driver's License, Birth Certificate, None" },
     theme_settings: { presetName: 'Angkor Terracotta', primaryColor: '#c0622b' },
-    telegram_settings: { botToken: '', chatId: '', rentalAlertTemplate: '', returnAlertTemplate: '', revenueAlertTemplate: '' }
+    telegram_settings: { botToken: '', chatId: '', checkoutAlertEnabled: true, checkinAlertEnabled: true, bookingAlertEnabled: true, rentalAlertTemplate: '', checkoutAlertTemplate: '', returnAlertTemplate: '', checkinAlertTemplate: '', bookingAlertTemplate: '', revenueAlertTemplate: '' }
   });
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [testResult, setTestResult] = useState(null);
@@ -509,26 +512,26 @@ export default function Admin() {
   //  LOGIN SCREEN
   // ══════════════════════════════════════════════════════════════════════════════
   if (!token) return (
-    <div className="min-h-screen bg-gradient-to-br from-stone-900 via-stone-800 to-stone-900 flex items-center justify-center p-5">
-      <form onSubmit={handleLogin} className="bg-white/10 backdrop-blur-lg border border-white/20 p-10 rounded-3xl shadow-2xl max-w-sm w-full">
-        <div className="text-center mb-8">
-          <div className="w-16 h-16 rounded-2xl bg-brand-500 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-brand-500/30">
-            <i className="fa-solid fa-motorcycle text-white text-2xl"></i>
+    <div className="min-h-screen bg-gradient-to-br from-stone-900 via-stone-800 to-stone-900 flex items-center justify-center p-4 sm:p-6">
+      <form onSubmit={handleLogin} className="bg-white/10 backdrop-blur-lg border border-white/20 p-6 sm:p-10 rounded-2xl sm:rounded-3xl shadow-2xl max-w-sm w-full">
+        <div className="text-center mb-6 sm:mb-8">
+          <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-brand-500 flex items-center justify-center mx-auto mb-3 sm:mb-4 shadow-lg shadow-brand-500/30">
+            <i className="fa-solid fa-motorcycle text-white text-xl sm:text-2xl"></i>
           </div>
-          <h2 className="text-2xl font-bold text-white">Admin Panel</h2>
-          <p className="text-stone-400 text-sm mt-1">Siem Reap Angkor PMS</p>
+          <h2 className="text-xl sm:text-2xl font-bold text-white">Admin Panel</h2>
+          <p className="text-stone-400 text-xs sm:text-sm mt-1">Siem Reap Angkor PMS</p>
         </div>
-        {loginError && <div className="bg-red-500/20 text-red-300 border border-red-500/30 text-sm p-3 rounded-xl mb-4">{loginError}</div>}
+        {loginError && <div className="bg-red-500/20 text-red-300 border border-red-500/30 text-xs sm:text-sm p-3 rounded-xl mb-4">{loginError}</div>}
         <div className="mb-4">
           <label className="block text-xs font-bold text-stone-400 uppercase tracking-wider mb-2">Username</label>
-          <input type="text" value={username} onChange={e=>setUsername(e.target.value)} className="w-full bg-white/10 border border-white/20 rounded-xl p-3 text-white placeholder-stone-500 outline-none focus:border-brand-400 transition-all" required />
+          <input type="text" value={username} onChange={e=>setUsername(e.target.value)} className="w-full bg-white/10 border border-white/20 rounded-xl p-3 text-white placeholder-stone-500 outline-none focus:border-brand-400 transition-all text-sm" required />
         </div>
-        <div className="mb-8">
+        <div className="mb-6 sm:mb-8">
           <label className="block text-xs font-bold text-stone-400 uppercase tracking-wider mb-2">Password</label>
-          <input type="password" value={password} onChange={e=>setPassword(e.target.value)} className="w-full bg-white/10 border border-white/20 rounded-xl p-3 text-white placeholder-stone-500 outline-none focus:border-brand-400 transition-all" required />
+          <input type="password" value={password} onChange={e=>setPassword(e.target.value)} className="w-full bg-white/10 border border-white/20 rounded-xl p-3 text-white placeholder-stone-500 outline-none focus:border-brand-400 transition-all text-sm" required />
         </div>
-        <button type="submit" className="w-full bg-brand-500 text-white font-bold py-3.5 rounded-xl hover:bg-brand-600 shadow-lg shadow-brand-500/30 transition-all">Sign In</button>
-        <Link to="/" className="block text-center mt-4 text-sm text-stone-500 hover:text-stone-300 transition-colors">← Return to Website</Link>
+        <button type="submit" className="w-full bg-brand-500 text-white font-bold py-3.5 rounded-xl hover:bg-brand-600 shadow-lg shadow-brand-500/30 transition-all cursor-pointer">Sign In</button>
+        <Link to="/" className="block text-center mt-4 text-xs sm:text-sm text-stone-500 hover:text-stone-300 transition-colors">← Return to Website</Link>
       </form>
     </div>
   );
@@ -537,13 +540,27 @@ export default function Admin() {
   //  DASHBOARD LAYOUT
   // ══════════════════════════════════════════════════════════════════════════════
   const sections = [...new Set(NAV.map(n=>n.section))].filter(s => s !== 'HIDDEN');
+  const pendingRoomBookings = bookings.filter(b => (b.type === 'room' || b.roomId || String(b.itemName || '').toLowerCase().includes('room')) && (b.status || 'pending') === 'pending').length;
+  const pendingMotorBookings = bookings.filter(b => b.type !== 'room' && !b.roomId && !String(b.itemName || '').toLowerCase().includes('room') && (b.status || 'pending') === 'pending').length;
+  const totalPendingBookings = pendingRoomBookings + pendingMotorBookings;
 
   return (
-    <div className="min-h-screen bg-[#fbf9f5] font-sans antialiased flex text-stone-800">
+    <div className="min-h-screen bg-[#fbf9f5] font-sans antialiased flex text-stone-800 relative">
+
+      {/* ─── MOBILE DRAWER BACKDROP ────────────────────────────────────────── */}
+      {mobileMenuOpen && (
+        <div
+          onClick={() => setMobileMenuOpen(false)}
+          className="fixed inset-0 bg-stone-900/60 backdrop-blur-xs z-40 md:hidden transition-opacity duration-300 animate-in fade-in"
+          aria-hidden="true"
+        />
+      )}
 
       {/* ─── SIDEBAR ──────────────────────────────────────────────────────── */}
-      <aside className="fixed top-0 left-0 h-full w-64 bg-white border-r border-stone-200/90 flex flex-col z-30 shadow-xs">
-        <div className="p-5 border-b border-stone-100">
+      <aside className={`fixed top-0 left-0 h-full w-72 sm:w-80 md:w-64 bg-white border-r border-stone-200/90 flex flex-col z-50 md:z-30 shadow-2xl md:shadow-xs transition-transform duration-300 ease-out ${
+        mobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+      }`}>
+        <div className="p-4 sm:p-5 border-b border-stone-100 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-brand-500 flex items-center justify-center shrink-0 shadow-sm">
               <i className="fa-solid fa-motorcycle text-white text-base"></i>
@@ -553,91 +570,161 @@ export default function Admin() {
               <p className="text-[10px] text-stone-400 font-semibold uppercase tracking-widest leading-none mt-1">Management System</p>
             </div>
           </div>
+          {/* Mobile close button */}
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen(false)}
+            className="md:hidden w-8 h-8 rounded-lg bg-stone-100 hover:bg-stone-200 active:scale-95 text-stone-500 hover:text-stone-800 flex items-center justify-center transition cursor-pointer"
+            aria-label="Close menu"
+          >
+            <i className="fa-solid fa-xmark text-base"></i>
+          </button>
+        </div>
+
+        {/* Quick Nav Search on Mobile */}
+        <div className="px-3 pt-3 pb-1 border-b border-stone-100 md:hidden">
+          <div className="relative">
+            <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 text-xs pointer-events-none"></i>
+            <input
+              type="text"
+              placeholder="Search tabs / ស្វែងរកមុខងារ..."
+              value={navSearch}
+              onChange={e => setNavSearch(e.target.value)}
+              className="w-full bg-stone-50 border border-stone-200 rounded-xl pl-8 pr-7 py-1.5 text-xs text-stone-800 placeholder-stone-400 outline-none focus:border-brand-500 focus:bg-white transition"
+            />
+            {navSearch && (
+              <button
+                type="button"
+                onClick={() => setNavSearch('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-700 text-xs w-4 h-4 flex items-center justify-center cursor-pointer"
+              >
+                &times;
+              </button>
+            )}
+          </div>
         </div>
 
         <nav className="flex-1 p-3 overflow-y-auto space-y-4">
-          {sections.map(section => (
-            <div key={section}>
-              <p className="px-3.5 text-[10px] font-bold text-stone-400 uppercase tracking-wider mb-2 mt-3">{section}</p>
-              {NAV.filter(n=>n.section===section).map(n => {
-                const isRoomBk = n.id === 'room-bookings';
-                const isMotorBk = n.id === 'bookings';
-                const pendingCount = isRoomBk
-                  ? bookings.filter(b => (b.type === 'room' || b.roomId || String(b.itemName || '').toLowerCase().includes('room')) && (b.status || 'pending') === 'pending').length
-                  : isMotorBk
-                  ? bookings.filter(b => b.type !== 'room' && !b.roomId && !String(b.itemName || '').toLowerCase().includes('room') && (b.status || 'pending') === 'pending').length
-                  : 0;
+          {sections.map(section => {
+            const sectionTabs = NAV.filter(n => {
+              if (n.section !== section) return false;
+              if (!navSearch.trim()) return true;
+              const q = navSearch.toLowerCase().trim();
+              return n.label.toLowerCase().includes(q) || (n.section || '').toLowerCase().includes(q) || n.id.toLowerCase().includes(q);
+            });
 
-                return (
-                  <button key={n.id} onClick={()=>setActiveTab(n.id)}
-                    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-[13px] font-semibold transition-all mb-1 ${activeTab===n.id ? 'bg-brand-500 text-white shadow-xs font-bold' : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100/70'}`}>
-                    <div className="flex items-center gap-3">
-                      <i className={`fa-solid ${n.icon} w-5 text-center text-sm opacity-90`}></i>
-                      <span>{n.label}</span>
-                    </div>
-                    {pendingCount > 0 && (
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-black tracking-wider ${
-                        activeTab === n.id ? 'bg-white text-stone-900 shadow-xs' : 'bg-amber-500 text-white animate-pulse'
-                      }`}>
-                        {pendingCount}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          ))}
+            if (sectionTabs.length === 0) return null;
+
+            return (
+              <div key={section}>
+                <p className="px-3.5 text-[10px] font-bold text-stone-400 uppercase tracking-wider mb-2 mt-3">{section}</p>
+                {sectionTabs.map(n => {
+                  const isRoomBk = n.id === 'room-bookings';
+                  const isMotorBk = n.id === 'bookings';
+                  const pendingCount = isRoomBk ? pendingRoomBookings : isMotorBk ? pendingMotorBookings : 0;
+
+                  return (
+                    <button key={n.id} onClick={() => { setActiveTab(n.id); setMobileMenuOpen(false); }}
+                      className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-[13px] font-semibold transition-all mb-1 cursor-pointer ${activeTab===n.id ? 'bg-brand-500 text-white shadow-xs font-bold' : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100/70'}`}>
+                      <div className="flex items-center gap-3">
+                        <i className={`fa-solid ${n.icon} w-5 text-center text-sm opacity-90`}></i>
+                        <span>{n.label}</span>
+                      </div>
+                      {pendingCount > 0 && (
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-black tracking-wider ${
+                          activeTab === n.id ? 'bg-white text-stone-900 shadow-xs' : 'bg-amber-500 text-white animate-pulse'
+                        }`}>
+                          {pendingCount}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })}
         </nav>
 
         <div className="p-3 border-t border-stone-100 space-y-1.5">
           <Link to="/" className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold text-stone-600 hover:text-stone-900 hover:bg-stone-100/70 transition-all">
             <i className="fa-solid fa-arrow-up-right-from-square"></i> View Live Site
           </Link>
-          <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold text-rose-600 hover:bg-rose-50 transition-all">
+          <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold text-rose-600 hover:bg-rose-50 transition-all cursor-pointer">
             <i className="fa-solid fa-right-from-bracket"></i> Logout
           </button>
         </div>
       </aside>
 
       {/* ─── MAIN CONTENT ─────────────────────────────────────────────────── */}
-      <main className="ml-64 flex-1 min-h-screen">
+      <main className="ml-0 md:ml-64 flex-1 min-h-screen pb-24 md:pb-8 flex flex-col w-full min-w-0">
 
         {/* Toast */}
-        <div className={`fixed top-6 right-6 z-50 bg-emerald-600 text-white px-5 py-3.5 rounded-2xl shadow-xl flex items-center gap-3 transition-all duration-500 ${newBookingAlert ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'}`}>
-          <i className="fa-solid fa-bell animate-bounce"></i>
-          <div><p className="font-bold text-sm">New Booking!</p><p className="text-xs text-emerald-100">Check Online Bookings tab.</p></div>
+        <div className={`fixed top-4 right-4 sm:top-6 sm:right-6 z-50 bg-emerald-600 text-white px-4 py-3 sm:px-5 sm:py-3.5 rounded-2xl shadow-xl flex items-center gap-3 transition-all duration-500 max-w-[90vw] ${newBookingAlert ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'}`}>
+          <i className="fa-solid fa-bell animate-bounce text-sm sm:text-base"></i>
+          <div><p className="font-bold text-xs sm:text-sm">New Booking!</p><p className="text-[10px] sm:text-xs text-emerald-100">Check Online Bookings tab.</p></div>
         </div>
 
         {/* ── Page header ───────────────────────────────────────────────── */}
-        <div className="bg-white/90 backdrop-blur-md border-b border-stone-200/80 px-8 py-4 flex items-center justify-between sticky top-0 z-20 shadow-xs">
-          <div>
-            <h2 className="text-lg font-bold text-stone-900 font-display">{NAV.find(n=>n.id===activeTab)?.label}</h2>
-            <p className="text-xs text-stone-500">{new Date().toLocaleDateString('en-GB',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p>
+        <div className="bg-white/95 backdrop-blur-md border-b border-stone-200/80 px-3.5 py-3 sm:px-6 sm:py-3.5 md:px-8 md:py-4 flex items-center justify-between sticky top-0 z-20 shadow-xs gap-2">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+            {/* Mobile hamburger button */}
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(prev => !prev)}
+              className="md:hidden w-9 h-9 rounded-xl bg-stone-100 hover:bg-stone-200 active:scale-95 text-stone-700 flex items-center justify-center shrink-0 transition shadow-xs border border-stone-200/60 cursor-pointer"
+              aria-label="Open Navigation Menu"
+            >
+              <i className="fa-solid fa-bars text-sm"></i>
+            </button>
+            <div className="min-w-0">
+              <h2 className="text-sm sm:text-base md:text-lg font-bold text-stone-900 font-display truncate leading-tight">
+                {NAV.find(n=>n.id===activeTab)?.label || 'Dashboard'}
+              </h2>
+              <p className="text-[10px] sm:text-xs text-stone-500 truncate hidden xs:block">
+                {new Date().toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short',year:'numeric'})}
+              </p>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors ${
+
+          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+            <div className={`flex items-center gap-1.5 px-2 py-1 sm:px-3 sm:py-1.5 rounded-xl text-[10px] sm:text-xs font-bold border transition-colors ${
               isLiveConnected ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'
             }`}>
-              <span className="relative flex h-2 w-2">
+              <span className="relative flex h-2 w-2 shrink-0">
                 {isLiveConnected && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>}
                 <span className={`relative inline-flex rounded-full h-2 w-2 ${isLiveConnected ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
               </span>
-              <span>{isLiveConnected ? 'Live Real-Time' : 'Connecting...'}</span>
+              <span className="hidden sm:inline">{isLiveConnected ? 'Live Real-Time' : 'Connecting...'}</span>
+              <span className="sm:hidden">{isLiveConnected ? 'Live' : '...'}</span>
             </div>
             {dashStats && (
-              <>
-                <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200/70 px-3 py-1.5 rounded-xl text-xs font-bold text-emerald-700">
-                  <i className="fa-solid fa-bed"></i> {dashStats.rooms?.vacant || 0} Vacant
-                </div>
-                <div className="flex items-center gap-2 bg-blue-50 border border-blue-200/70 px-3 py-1.5 rounded-xl text-xs font-bold text-blue-700">
-                  <i className="fa-solid fa-motorcycle"></i> {dashStats.bikes?.available || 0} Available
-                </div>
-              </>
+              <div className="flex items-center gap-1 sm:gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('rooms')}
+                  className="flex items-center gap-1 sm:gap-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/70 px-2 py-1 sm:px-3 sm:py-1.5 rounded-xl text-[10px] sm:text-xs font-bold text-emerald-700 transition cursor-pointer"
+                  title="View Rooms"
+                >
+                  <i className="fa-solid fa-bed text-[10px]"></i>
+                  <span>{dashStats.rooms?.vacant || 0}</span>
+                  <span className="hidden sm:inline">Vacant</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('fleet')}
+                  className="flex items-center gap-1 sm:gap-1.5 bg-blue-50 hover:bg-blue-100 border border-blue-200/70 px-2 py-1 sm:px-3 sm:py-1.5 rounded-xl text-[10px] sm:text-xs font-bold text-blue-700 transition cursor-pointer"
+                  title="View Fleet"
+                >
+                  <i className="fa-solid fa-motorcycle text-[10px]"></i>
+                  <span>{dashStats.bikes?.available || 0}</span>
+                  <span className="hidden sm:inline">Available</span>
+                </button>
+              </div>
             )}
           </div>
         </div>
 
-        <div className="p-6 md:p-8 space-y-6">
+        <div className="p-3.5 sm:p-6 md:p-8 space-y-4 sm:space-y-6 flex-1 min-w-0">
 
           {/* Floating Toast for Telegram Alerts */}
           {tgAlertToast && (
@@ -841,59 +928,24 @@ export default function Admin() {
           )}
 
           {/* ═══════════════════════════════════════════════════════════════ */}
-          {/* ONLINE BOOKINGS (from public website) */}
-          {/* ═══════════════════════════════════════════════════════════════ */}
-          {activeTab === 'bookings' && (
-            loadingData ? (
-              <AdminTableSkeleton rows={7} cols={6} />
-            ) : (
-              <BookingsTab
-                bookings={bookings}
-                setBookings={setBookings}
-                auth={auth}
-                fetchAll={fetchAll}
-                inputCls={inputCls}
-                labelCls={labelCls}
-                cardCls={cardCls}
-                btnPrimary={btnPrimary}
-                btnSecondary={btnSecondary}
-                btnDanger={btnDanger}
-                statusBadge={statusBadge}
-              />
-            )
-          )}
-
-          {/* ═══════════════════════════════════════════════════════════════ */}
-          {/* GUESTS CRM */}
-          {/* ═══════════════════════════════════════════════════════════════ */}
-          {activeTab === 'guests' && (
-            loadingData ? (
-              <AdminTableSkeleton rows={7} cols={5} />
-            ) : (
-              <GuestsTab guests={guests} auth={auth} fetchAll={fetchAll} inputCls={inputCls} labelCls={labelCls} cardCls={cardCls} btnPrimary={btnPrimary} btnDanger={btnDanger} />
-            )
-          )}
-
-          {/* ═══════════════════════════════════════════════════════════════ */}
-          {/* FLEET MANAGER (Bikes CRUD) */}
-          {/* ═══════════════════════════════════════════════════════════════ */}
-          {activeTab === 'fleet' && (
-            loadingData ? (
-              <AdminTableSkeleton rows={7} cols={6} />
-            ) : (
-              <FleetTab bikes={bikes} models={models} setBikes={setBikes} setModels={setModels} auth={auth} fetchAll={fetchAll} inputCls={inputCls} labelCls={labelCls} cardCls={cardCls} btnPrimary={btnPrimary} btnSecondary={btnSecondary} btnDanger={btnDanger} statusBadge={statusBadge} currency={currency} rooms={rooms} />
-            )
-          )}
-
-          {/* ═══════════════════════════════════════════════════════════════ */}
           {/* REPORTS */}
           {/* ═══════════════════════════════════════════════════════════════ */}
           {activeTab === 'reports' && (
-            (loadingReports || !reports) ? (
-              <AdminChartSkeleton />
-            ) : (
-              <ReportsTab reports={reports} reportPeriod={reportPeriod} setReportPeriod={setReportPeriod} cardCls={cardCls} currency={currency} />
-            )
+            <ReportsTab
+              reports={reports}
+              rentals={rentals}
+              occupancy={occupancy}
+              bookings={bookings}
+              bikes={bikes}
+              rooms={rooms}
+              models={models}
+              reportPeriod={reportPeriod}
+              setReportPeriod={setReportPeriod}
+              cardCls={cardCls}
+              currency={currency}
+              sendCategoryTelegramAlert={sendCategoryTelegramAlert}
+              tgSending={tgSending}
+            />
           )}
 
           {/* ═══════════════════════════════════════════════════════════════ */}
@@ -1278,7 +1330,13 @@ export default function Admin() {
           {activeTab === 'check-out' && (
             <CheckoutTab
               bikes={bikes}
+              models={models}
+              setBikes={setBikes}
               rentals={rentals}
+              setRentals={setRentals}
+              staff={staff}
+              guests={guests}
+              setGuests={setGuests}
               auth={auth}
               fetchAll={fetchAll}
               inputCls={inputCls}
@@ -1294,7 +1352,10 @@ export default function Admin() {
           {activeTab === 'check-in' && (
             <CheckinTab
               rentals={rentals}
+              setRentals={setRentals}
               bikes={bikes}
+              setBikes={setBikes}
+              staff={staff}
               auth={auth}
               fetchAll={fetchAll}
               inputCls={inputCls}
@@ -1345,6 +1406,7 @@ export default function Admin() {
               rentals={rentals}
               setRentals={setRentals}
               bikes={bikes}
+              staff={staff}
               auth={auth}
               fetchAll={fetchAll}
               cardCls={cardCls}
@@ -1476,6 +1538,78 @@ export default function Admin() {
 
         </div>
       </main>
+
+      {/* ─── MOBILE BOTTOM NAVIGATION BAR ─────────────────────────────────── */}
+      <nav className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-lg border-t border-stone-200/90 py-2 px-2 md:hidden flex items-center justify-around shadow-[0_-4px_25px_rgba(0,0,0,0.08)] pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))]">
+        <button
+          type="button"
+          onClick={() => { setActiveTab('dashboard'); setMobileMenuOpen(false); }}
+          className={`flex flex-col items-center justify-center flex-1 py-1 transition-all cursor-pointer ${
+            activeTab === 'dashboard' ? 'text-brand-600 font-bold scale-105' : 'text-stone-400 hover:text-stone-700'
+          }`}
+        >
+          <i className="fa-solid fa-table-cells-large text-base mb-0.5"></i>
+          <span className="text-[10px] tracking-tight">Home</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => { setActiveTab('check-out'); setMobileMenuOpen(false); }}
+          className={`flex flex-col items-center justify-center flex-1 py-1 transition-all cursor-pointer ${
+            activeTab === 'check-out' ? 'text-brand-600 font-bold scale-105' : 'text-stone-400 hover:text-stone-700'
+          }`}
+        >
+          <i className="fa-solid fa-clipboard-check text-base mb-0.5"></i>
+          <span className="text-[10px] tracking-tight">Check Out</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => { setActiveTab('check-in'); setMobileMenuOpen(false); }}
+          className={`flex flex-col items-center justify-center flex-1 py-1 transition-all cursor-pointer ${
+            activeTab === 'check-in' ? 'text-brand-600 font-bold scale-105' : 'text-stone-400 hover:text-stone-700'
+          }`}
+        >
+          <i className="fa-solid fa-circle-left text-base mb-0.5"></i>
+          <span className="text-[10px] tracking-tight">Check In</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => { setActiveTab('bookings'); setMobileMenuOpen(false); }}
+          className={`flex flex-col items-center justify-center flex-1 py-1 transition-all relative cursor-pointer ${
+            activeTab === 'bookings' || activeTab === 'room-bookings' ? 'text-brand-600 font-bold scale-105' : 'text-stone-400 hover:text-stone-700'
+          }`}
+        >
+          <div className="relative">
+            <i className="fa-solid fa-calendar-check text-base mb-0.5"></i>
+            {totalPendingBookings > 0 && (
+              <span className="absolute -top-1 -right-2.5 bg-amber-500 text-white font-black text-[9px] min-w-4 h-4 rounded-full flex items-center justify-center px-1 animate-pulse shadow-xs">
+                {totalPendingBookings}
+              </span>
+            )}
+          </div>
+          <span className="text-[10px] tracking-tight">Bookings</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setMobileMenuOpen(true)}
+          className={`flex flex-col items-center justify-center flex-1 py-1 transition-all relative cursor-pointer ${
+            mobileMenuOpen || (!['dashboard', 'check-out', 'check-in', 'bookings', 'room-bookings'].includes(activeTab))
+              ? 'text-brand-600 font-bold'
+              : 'text-stone-400 hover:text-stone-700'
+          }`}
+        >
+          <div className="relative">
+            <i className="fa-solid fa-bars text-base mb-0.5"></i>
+            {!['dashboard', 'check-out', 'check-in', 'bookings', 'room-bookings'].includes(activeTab) && (
+              <span className="absolute -top-0.5 -right-1 w-2 h-2 bg-brand-500 rounded-full"></span>
+            )}
+          </div>
+          <span className="text-[10px] tracking-tight">Menu</span>
+        </button>
+      </nav>
 
       {/* Modal popups are rendered by ModalProvider in main.jsx */}
     </div>
@@ -1865,17 +1999,42 @@ function BookingsTab({ bookings, setBookings, auth, fetchAll, inputCls, labelCls
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  // Fast optimistic status change (0ms latency)
-  const handleUpdateStatus = (id, newStatus) => {
-    setBookings(prev => prev.map(b => b.id === id ? { ...b, status: newStatus } : b));
-    fetch(`/api/bookings/${id}/status`, {
-      method: 'PATCH',
-      ...auth,
-      body: JSON.stringify({ status: newStatus })
-    }).catch(err => {
+  // Fast optimistic status change (persisted to Firestore + SQLite)
+  const handleUpdateStatus = async (bookingOrId, newStatus) => {
+    const booking = typeof bookingOrId === 'object'
+      ? bookingOrId
+      : (bookings.find(b => String(b.id) === String(bookingOrId)) || { id: bookingOrId });
+    const id = booking.id;
+    const bookingRef = booking.bookingRef;
+    const isRoom = booking.type === 'room' || Boolean(booking.roomId) || String(booking.itemName || '').toLowerCase().includes('room');
+
+    // 1. Optimistic UI update (0ms latency)
+    setBookings(prev => prev.map(b => (String(b.id) === String(id) || (bookingRef && b.bookingRef === bookingRef)) ? { ...b, status: newStatus } : b));
+
+    // 2. Persist directly to Firestore (cloud source of truth)
+    try {
+      if (id) {
+        const updatePromises = [BookingService.update(id, { status: newStatus })];
+        if (isRoom) {
+          updatePromises.push(HotelBookingService.update(id, { status: newStatus }));
+        }
+        await Promise.allSettled(updatePromises);
+      }
+    } catch (fsErr) {
+      console.warn('Firestore status update error:', fsErr);
+    }
+
+    // 3. Persist to local server / SQLite
+    const targetId = bookingRef || id;
+    try {
+      await fetch(`/api/bookings/${encodeURIComponent(targetId)}/status`, {
+        method: 'PATCH',
+        ...auth,
+        body: JSON.stringify({ status: newStatus })
+      });
+    } catch (err) {
       console.error('Status update failed:', err);
-      fetchAll();
-    });
+    }
   };
 
   // Fast optimistic delete (0ms latency)
@@ -2227,7 +2386,7 @@ function BookingsTab({ bookings, setBookings, auth, fetchAll, inputCls, labelCls
                       <div className="flex items-center gap-1.5">
                         {bStatus === 'pending' && (
                           <button
-                            onClick={() => handleUpdateStatus(b.id, 'confirmed')}
+                            onClick={() => handleUpdateStatus(b, 'confirmed')}
                             title="Confirm Booking"
                             className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors"
                           >
@@ -2237,7 +2396,7 @@ function BookingsTab({ bookings, setBookings, auth, fetchAll, inputCls, labelCls
 
                         {bStatus !== 'cancelled' && (
                           <button
-                            onClick={() => handleUpdateStatus(b.id, 'cancelled')}
+                            onClick={() => handleUpdateStatus(b, 'cancelled')}
                             title="Cancel Booking"
                             className="px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors"
                           >
@@ -3351,77 +3510,7 @@ function FleetTab({ bikes, models, setBikes, setModels, auth, fetchAll, inputCls
   );
 }
 
-function ReportsTab({ reports, reportPeriod, setReportPeriod, cardCls, currency }) {
-  const totalRevenue = (reports?.roomRevenue||0) + (reports?.bikeRevenue||0);
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        {[['week','Last 7 Days'],['month','Last 30 Days'],['year','Last Year']].map(([p,l])=>(
-          <button key={p} onClick={()=>setReportPeriod(p)} className={`px-4 py-2 text-sm font-bold rounded-xl transition-all ${reportPeriod===p?'bg-stone-900 text-white':'bg-white border border-stone-200 text-stone-600 hover:bg-stone-50'}`}>{l}</button>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-        {[
-          { label:'Total Revenue', value: currency(totalRevenue), icon:'fa-dollar-sign', color:'text-emerald-600 bg-emerald-50 border-emerald-100' },
-          { label:'Room Revenue', value: currency(reports?.roomRevenue||0), icon:'fa-bed', color:'text-blue-600 bg-blue-50 border-blue-100' },
-          { label:'Bike Revenue', value: currency(reports?.bikeRevenue||0), icon:'fa-motorcycle', color:'text-brand-600 bg-brand-50 border-brand-100' },
-        ].map((s,i)=>(
-          <div key={i} className={`${cardCls} p-6 flex items-center gap-4`}>
-            <div className={`w-12 h-12 rounded-xl flex items-center justify-center border shrink-0 ${s.color}`}><i className={`fa-solid ${s.icon} text-lg`}></i></div>
-            <div><p className="text-xs text-stone-400 font-bold uppercase tracking-wide">{s.label}</p><p className="text-2xl font-black text-stone-900">{s.value}</p></div>
-          </div>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Daily revenue bars */}
-        <div className={`${cardCls} p-6`}>
-          <h3 className="font-bold text-stone-900 mb-5">Daily Revenue</h3>
-          {reports?.dailyRevenue?.length > 0 ? (
-            <div className="space-y-2">
-              {reports.dailyRevenue.slice(-14).map((d,i)=>{
-                const maxVal = Math.max(...reports.dailyRevenue.map(x=>x.total));
-                const pct = maxVal > 0 ? (d.total/maxVal)*100 : 0;
-                return (
-                  <div key={i} className="flex items-center gap-3 text-xs">
-                    <span className="w-20 text-stone-400 shrink-0 text-right">{d.day?.slice(5)}</span>
-                    <div className="flex-1 bg-stone-100 rounded-full h-5 overflow-hidden">
-                      <div className="h-full bg-brand-400 rounded-full transition-all" style={{width:`${pct}%`}}></div>
-                    </div>
-                    <span className="w-14 font-bold text-stone-700 shrink-0">{currency(d.total)}</span>
-                  </div>
-                );
-              })}
-            </div>
-          ) : <p className="text-stone-400 text-sm text-center py-12">No revenue data yet.</p>}
-        </div>
-
-        {/* Top bikes */}
-        <div className={`${cardCls} p-6`}>
-          <h3 className="font-bold text-stone-900 mb-5">Most Rented Bikes</h3>
-          {reports?.topBikes?.length > 0 ? (
-            <div className="space-y-3">
-              {reports.topBikes.map((b,i)=>(
-                <div key={i} className="flex items-center gap-4">
-                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-sm shrink-0 ${i===0?'bg-amber-100 text-amber-700':i===1?'bg-stone-200 text-stone-600':'bg-stone-100 text-stone-500'}`}>{i+1}</div>
-                  <div className="flex-1">
-                    <p className="text-sm font-bold text-stone-900">{b.name}</p>
-                    <div className="w-full bg-stone-100 rounded-full h-2 mt-1.5 overflow-hidden">
-                      <div className="h-full bg-brand-400 rounded-full" style={{width:`${(b.rentals/(reports.topBikes[0]?.rentals||1))*100}%`}}></div>
-                    </div>
-                  </div>
-                  <span className="text-sm font-bold text-stone-600 shrink-0">{b.rentals}x</span>
-                </div>
-              ))}
-            </div>
-          ) : <p className="text-stone-400 text-sm text-center py-12">No rental data yet.</p>}
-        </div>
-      </div>
-    </div>
-  );
-}
+// ReportsTab is imported from ./admin/ReportsTab
 
 // SettingsTab is imported from ./admin/SettingsTab
 
@@ -3554,34 +3643,34 @@ function DashboardTab({ bikes, models, rentals, bookings, rooms, cardCls, loadin
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3.5">
-        <div className={`${cardCls} p-4 text-center border-stone-200`}>
-          <p className="text-[11px] font-bold text-stone-400 uppercase tracking-wider mb-1">ម៉ូតូសរុប</p>
-          <p className="text-2xl font-black text-stone-900">{totalBikes}</p>
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2.5 sm:gap-3.5">
+        <div className={`${cardCls} p-3 sm:p-4 text-center border-stone-200`}>
+          <p className="text-[10px] sm:text-[11px] font-bold text-stone-400 uppercase tracking-wider mb-1">ម៉ូតូសរុប</p>
+          <p className="text-xl sm:text-2xl font-black text-stone-900">{totalBikes}</p>
         </div>
-        <div onClick={()=>openModal('available')} className={`${cardCls} p-4 text-center border-emerald-200 bg-emerald-50/40 cursor-pointer hover:shadow-md transition`}>
-          <p className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider mb-1">ម៉ូតូទំនេរ</p>
-          <p className="text-2xl font-black text-emerald-700">{availableBikes.length}</p>
+        <div onClick={()=>openModal('available')} className={`${cardCls} p-3 sm:p-4 text-center border-emerald-200 bg-emerald-50/40 cursor-pointer hover:shadow-md transition`}>
+          <p className="text-[10px] sm:text-[11px] font-bold text-emerald-700 uppercase tracking-wider mb-1">ម៉ូតូទំនេរ</p>
+          <p className="text-xl sm:text-2xl font-black text-emerald-700">{availableBikes.length}</p>
         </div>
-        <div className={`${cardCls} p-4 text-center border-purple-200 bg-purple-50/40`}>
-          <p className="text-[11px] font-bold text-purple-700 uppercase tracking-wider mb-1">ចំនួនកក់</p>
-          <p className="text-2xl font-black text-purple-700">{(bookings || []).length}</p>
+        <div className={`${cardCls} p-3 sm:p-4 text-center border-purple-200 bg-purple-50/40`}>
+          <p className="text-[10px] sm:text-[11px] font-bold text-purple-700 uppercase tracking-wider mb-1">ចំនួនកក់</p>
+          <p className="text-xl sm:text-2xl font-black text-purple-700">{(bookings || []).length}</p>
         </div>
-        <div onClick={()=>openModal('rented')} className={`${cardCls} p-4 text-center border-blue-200 bg-blue-50/40 cursor-pointer hover:shadow-md transition`}>
-          <p className="text-[11px] font-bold text-blue-700 uppercase tracking-wider mb-1">កំពុងជួល</p>
-          <p className="text-2xl font-black text-blue-700">{rentedBikes.length}</p>
+        <div onClick={()=>openModal('rented')} className={`${cardCls} p-3 sm:p-4 text-center border-blue-200 bg-blue-50/40 cursor-pointer hover:shadow-md transition`}>
+          <p className="text-[10px] sm:text-[11px] font-bold text-blue-700 uppercase tracking-wider mb-1">កំពុងជួល</p>
+          <p className="text-xl sm:text-2xl font-black text-blue-700">{rentedBikes.length}</p>
         </div>
-        <div className={`${cardCls} p-4 text-center border-rose-200 bg-rose-50/40`}>
-          <p className="text-[11px] font-bold text-rose-700 uppercase tracking-wider mb-1">ជួសជុល</p>
-          <p className="text-2xl font-black text-rose-700">{repairBikes.length}</p>
+        <div className={`${cardCls} p-3 sm:p-4 text-center border-rose-200 bg-rose-50/40`}>
+          <p className="text-[10px] sm:text-[11px] font-bold text-rose-700 uppercase tracking-wider mb-1">ជួសជុល</p>
+          <p className="text-xl sm:text-2xl font-black text-rose-700">{repairBikes.length}</p>
         </div>
-        <div className={`${cardCls} p-4 text-center border-amber-200 bg-amber-50/40`}>
-          <p className="text-[11px] font-bold text-amber-800 uppercase tracking-wider mb-1">ចំណូលថ្ងៃនេះ</p>
-          <p className="text-xl font-black text-amber-800">${parseFloat(todayIncome || 0).toFixed(2)}</p>
+        <div className={`${cardCls} p-3 sm:p-4 text-center border-amber-200 bg-amber-50/40`}>
+          <p className="text-[10px] sm:text-[11px] font-bold text-amber-800 uppercase tracking-wider mb-1">ចំណូលថ្ងៃនេះ</p>
+          <p className="text-lg sm:text-xl font-black text-amber-800">${parseFloat(todayIncome || 0).toFixed(2)}</p>
         </div>
-        <div className={`${cardCls} p-4 text-center border-stone-200 bg-stone-50`}>
-          <p className="text-[11px] font-bold text-stone-500 uppercase tracking-wider mb-1">ចំណូលសរុប</p>
-          <p className="text-xl font-black text-brand-600">${parseFloat(monthIncome || 0).toFixed(2)}</p>
+        <div className={`${cardCls} p-3 sm:p-4 text-center border-stone-200 bg-stone-50 col-span-2 sm:col-span-1`}>
+          <p className="text-[10px] sm:text-[11px] font-bold text-stone-500 uppercase tracking-wider mb-1">ចំណូលសរុប</p>
+          <p className="text-lg sm:text-xl font-black text-brand-600">${parseFloat(monthIncome || 0).toFixed(2)}</p>
         </div>
       </div>
 

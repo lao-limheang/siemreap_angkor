@@ -194,18 +194,33 @@ export default function RoomBookingsTab({
   // Use bookingRef when available (Firestore bookings have string ids that don't match SQLite)
   const getDbIdentifier = (booking) => booking.bookingRef || booking.id;
 
-  const handleUpdateStatus = (id, newStatus, bookingRef) => {
-    // Optimistically update local state immediately
-    setBookings(prev => prev.map(b => (b.id === id ? { ...b, status: newStatus } : b)));
-    // Use bookingRef as the URL param if available — server matches by id OR bookingRef
+  const handleUpdateStatus = async (id, newStatus, bookingRef) => {
+    // 1. Optimistically update local state immediately
+    setBookings(prev => prev.map(b => (b.id === id || (bookingRef && b.bookingRef === bookingRef) ? { ...b, status: newStatus } : b)));
+
+    // 2. Persist to Firestore
+    try {
+      if (id) {
+        await Promise.allSettled([
+          BookingService.update(id, { status: newStatus }),
+          HotelBookingService.update(id, { status: newStatus })
+        ]);
+      }
+    } catch (fsErr) {
+      console.warn('Firestore status update error in RoomBookings:', fsErr);
+    }
+
+    // 3. Persist to server / SQLite
     const urlId = bookingRef || id;
-    return fetch(`/api/bookings/${urlId}/status`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', ...(auth?.headers || {}) },
-      body: JSON.stringify({ status: newStatus })
-    }).catch(err => {
+    try {
+      await fetch(`/api/bookings/${encodeURIComponent(urlId)}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...(auth?.headers || {}) },
+        body: JSON.stringify({ status: newStatus })
+      });
+    } catch (err) {
       console.error('Status update failed:', err);
-    });
+    }
   };
 
   // ─── CHECK-IN GUEST DIRECTLY TO ROOM ──────────────────────────────────────
