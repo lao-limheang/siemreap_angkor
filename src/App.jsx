@@ -1,9 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import { io } from 'socket.io-client';
-import { createSocket } from './services/socket';
-import { doc, getDoc, setDoc, updateDoc, increment } from 'firebase/firestore';
-import { dbRooms as db } from './firebase';
+import { getSocket } from './services/socket';
+import { doc, getDoc, setDoc, updateDoc, increment, onSnapshot } from 'firebase/firestore';
+import { dbRooms as db, dbMotos } from './firebase';
 import Navbar from './components/Navbar';
 import Hero from './components/Hero';
 import FeaturedServices from './components/FeaturedServices';
@@ -108,7 +108,7 @@ function App() {
   const [loadingSettings, setLoadingSettings] = useState(true);
   const [publicSettings, setPublicSettings] = useState({
     hero_images: [],
-    about_us: { title: '', p1: '', p2: '', image1: '', image2: '' },
+    about_us: { title: '', p1: '', p2: '', image1: '', image2: '', features: [] },
     why_us: { title: '', p1: '', p2: '', p3: '', stats: [], features: [] },
     services_bar: [],
     testimonials: [],
@@ -118,19 +118,19 @@ function App() {
   });
 
   const fetchPublicSettings = useCallback(() => {
-    fetch('/api/public-settings')
+    fetch(`/api/public-settings?_t=${Date.now()}`, { cache: 'no-store' })
       .then(res => {
         if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
         return res.json();
       })
       .then(data => {
         const parsed = {};
-        ['hero_images', 'about_us', 'why_us', 'services_bar', 'testimonials', 'contact_info', 'business_profile', 'pricing_tax', 'payment_methods', 'invoice_settings', 'public_texts'].forEach(key => {
-          if (data[key]) {
+        ['hero_images', 'about_us', 'why_us', 'services_bar', 'testimonials', 'contact_info', 'business_profile', 'pricing_tax', 'payment_methods', 'invoice_settings', 'public_texts', 'shop_settings', 'theme_settings'].forEach(key => {
+          if (data[key] !== undefined && data[key] !== null) {
             try {
               parsed[key] = typeof data[key] === 'string' ? JSON.parse(data[key]) : data[key];
             } catch (err) {
-              console.error(`Error parsing ${key}:`, err);
+              parsed[key] = data[key];
             }
           }
         });
@@ -144,6 +144,12 @@ function App() {
             features: asArray(parsed.why_us.features),
           };
         }
+        if (parsed.about_us && typeof parsed.about_us === 'object') {
+          parsed.about_us = {
+            ...parsed.about_us,
+            features: asArray(parsed.about_us.features),
+          };
+        }
         setPublicSettings(prev => ({ ...prev, ...parsed }));
       })
       .catch(console.error)
@@ -152,9 +158,29 @@ function App() {
 
   useEffect(() => {
     fetchPublicSettings();
-    const socket = createSocket();
-    socket.on('settings_updated', fetchPublicSettings);
-    return () => socket.disconnect();
+    const socket = getSocket();
+
+    const handleUpdate = () => {
+      fetchPublicSettings();
+    };
+
+    socket.on('connect', handleUpdate);
+    socket.on('reconnect', handleUpdate);
+    socket.on('settings_updated', handleUpdate);
+    socket.on('public_settings_updated', handleUpdate);
+
+    // Auto-refresh when tab gains focus or device reconnects
+    window.addEventListener('focus', handleUpdate);
+    window.addEventListener('online', handleUpdate);
+
+    return () => {
+      socket.off('connect', handleUpdate);
+      socket.off('reconnect', handleUpdate);
+      socket.off('settings_updated', handleUpdate);
+      socket.off('public_settings_updated', handleUpdate);
+      window.removeEventListener('focus', handleUpdate);
+      window.removeEventListener('online', handleUpdate);
+    };
   }, [fetchPublicSettings]);
 
   return (

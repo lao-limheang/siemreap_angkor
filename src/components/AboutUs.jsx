@@ -47,8 +47,8 @@ export default function AboutUs({ data, servicesBarData, whyUsData, loading = fa
 
   // --- Why Us Data ---
   const whyUs = whyUsData || {};
-  const stats = whyUs.stats || [];
-  const features = whyUs.features || [];
+  const stats = (whyUs.stats && whyUs.stats.length > 0) ? whyUs.stats : (info.stats || []);
+  const features = (info.features && info.features.length > 0) ? info.features : (whyUs.features || []);
 
   return (
     <section id="about" className="section-pad bg-stone-50 overflow-hidden">

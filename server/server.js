@@ -1733,42 +1733,48 @@ app.post('/api/staff', authenticateToken, (req, res) => {
       else {
         db.run(`INSERT INTO audit_logs (action, performedBy, details) VALUES (?, ?, ?)`,
           ['Create Staff Account', req.user?.username || 'Admin', `Created staff user '${username}' (${role})`]);
+        io.emit('staff_updated');
         res.json({ id: this.lastID });
       }
     });
 });
-app.put('/api/staff/:id', authenticateToken, (req, res) => {
-  const { password, fullName, role, permissions, phone, status } = req.body;
-  if (password) {
-    db.run(`UPDATE staff_users SET password=?, fullName=?, role=?, permissions=?, phone=?, status=? WHERE id=?`,
-      [password, fullName, role, permissions, phone, status, req.params.id],
+const handleUpdateStaff = (req, res) => {
+  const { username, password, fullName, role, permissions, phone, status } = req.body;
+  if (password && password.trim()) {
+    db.run(`UPDATE staff_users SET username=COALESCE(?, username), password=?, fullName=?, role=?, permissions=?, phone=?, status=? WHERE id=?`,
+      [username || null, password, fullName, role, permissions || '', phone || '', status || 'active', req.params.id],
       function(err) {
         if (err) res.status(500).json({ error: err.message });
         else {
           db.run(`INSERT INTO audit_logs (action, performedBy, details) VALUES (?, ?, ?)`,
-            ['Update Staff Account', req.user?.username || 'Admin', `Updated staff ID #${req.params.id} (${fullName})`]);
+            ['Update Staff Account', req.user?.username || 'Admin', `Updated staff ID #${req.params.id} (${fullName || username})`]);
+          io.emit('staff_updated');
           res.json({ changes: this.changes });
         }
       });
   } else {
-    db.run(`UPDATE staff_users SET fullName=?, role=?, permissions=?, phone=?, status=? WHERE id=?`,
-      [fullName, role, permissions, phone, status, req.params.id],
+    db.run(`UPDATE staff_users SET username=COALESCE(?, username), fullName=?, role=?, permissions=?, phone=?, status=? WHERE id=?`,
+      [username || null, fullName, role, permissions || '', phone || '', status || 'active', req.params.id],
       function(err) {
         if (err) res.status(500).json({ error: err.message });
         else {
           db.run(`INSERT INTO audit_logs (action, performedBy, details) VALUES (?, ?, ?)`,
-            ['Update Staff Account', req.user?.username || 'Admin', `Updated staff ID #${req.params.id} (${fullName})`]);
+            ['Update Staff Account', req.user?.username || 'Admin', `Updated staff ID #${req.params.id} (${fullName || username})`]);
+          io.emit('staff_updated');
           res.json({ changes: this.changes });
         }
       });
   }
-});
+};
+app.put('/api/staff/:id', authenticateToken, handleUpdateStaff);
+app.patch('/api/staff/:id', authenticateToken, handleUpdateStaff);
 app.delete('/api/staff/:id', authenticateToken, (req, res) => {
   db.run("DELETE FROM staff_users WHERE id = ?", req.params.id, function(err) {
     if (err) res.status(500).json({ error: err.message });
     else {
       db.run(`INSERT INTO audit_logs (action, performedBy, details) VALUES (?, ?, ?)`,
         ['Delete Staff Account', req.user?.username || 'Admin', `Removed staff user ID #${req.params.id}`]);
+      io.emit('staff_updated');
       res.json({ changes: this.changes });
     }
   });
@@ -2006,6 +2012,10 @@ app.get('/api/settings', authenticateToken, (req, res) => {
   });
 });
 app.get('/api/public-settings', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Surrogate-Control', 'no-store');
   db.all("SELECT key, value FROM settings WHERE key IN ('hero_images','about_us','why_us','services_bar','testimonials','contact_info','business_profile','pricing_tax','payment_methods','invoice_settings','public_texts','shop_settings','theme_settings')", [], (err, rows) => {
     if (err) res.status(500).json({ error: err.message });
     else { const s = {}; rows.forEach(r => s[r.key] = r.value); res.json(s); }
@@ -2033,6 +2043,7 @@ app.post('/api/public-reviews', (req, res) => {
     db.run("INSERT OR REPLACE INTO settings (key, value) VALUES ('testimonials', ?)", [JSON.stringify(testimonials)], function(err2) {
       if (err2) { res.status(500).json({ error: err2.message }); return; }
       io.emit('settings_updated');
+      io.emit('public_settings_updated');
 
       // Send Telegram notification
       const stars = '⭐'.repeat(Math.max(1, Math.min(5, Number(rating) || 5)));
@@ -2072,6 +2083,7 @@ app.post('/api/settings', authenticateToken, (req, res) => {
       } catch (ignore) {}
 
       io.emit('settings_updated');
+      io.emit('public_settings_updated');
       res.json({ success: true });
     });
   });

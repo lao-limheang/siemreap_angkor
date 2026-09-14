@@ -31,7 +31,7 @@ export default function IncomeTab({
   const [editingRental, setEditingRental] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Extract unique staff names from rentals for filter dropdown
+  // Extract unique staff names from rentals & registered staff for filter dropdown
   const staffOptions = useMemo(() => {
     const set = new Set();
     (rentals || []).forEach(r => {

@@ -3,8 +3,7 @@ import { useModal } from './common/ModalProvider';
 import { Link } from 'react-router-dom';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { dbMotos, dbRooms as firedb } from '../firebase';
-import { io } from 'socket.io-client';
-import { createSocket } from '../services/socket';
+import { getSocket, createSocket } from '../services/socket';
 import { AdminStatsSkeleton, AdminTableSkeleton, AdminChartSkeleton, Skeleton } from './Skeleton';
 import {
   MotoService,
@@ -406,6 +405,7 @@ export default function Admin() {
     socket.on('housekeeping_updated', () => { fetchAll(); });
     socket.on('guests_updated', () => { fetchAll(); });
     socket.on('settings_updated', () => { fetchSettings(); });
+    socket.on('staff_updated', () => { fetchAll(); });
 
     return () => {
       unsubBikes();
@@ -445,7 +445,8 @@ export default function Admin() {
 
   const saveSettings = async (customPayload, options = {}) => {
     try {
-      const payloadToSend = customPayload && typeof customPayload === 'object' && !customPayload.nativeEvent ? { ...settings, ...customPayload } : settings;
+      const isEvent = customPayload && (customPayload.nativeEvent || customPayload.target || customPayload._reactName || typeof customPayload.preventDefault === 'function');
+      const payloadToSend = customPayload && typeof customPayload === 'object' && !isEvent ? { ...settings, ...customPayload } : settings;
       
       // 1. Optimistic UI update immediately
       setSettings(prev => ({ ...prev, ...payloadToSend }));
@@ -493,6 +494,13 @@ export default function Admin() {
       }
 
       if (res.ok) {
+        try {
+          const s = getSocket();
+          if (s && s.connected) {
+            s.emit('settings_updated');
+          }
+        } catch (ignore) {}
+
         if (!options.silent) {
           showModal('success', 'រក្សាទុកជោគជ័យ!', 'ការកំណត់ត្រូវបានរក្សាទុកដោយជោគជ័យ (Settings saved successfully)');
         }
@@ -1489,6 +1497,7 @@ export default function Admin() {
               btnPrimary={btnPrimary}
               btnSecondary={btnSecondary}
               btnDanger={btnDanger}
+              fetchAll={fetchAll}
             />
           )}
 
