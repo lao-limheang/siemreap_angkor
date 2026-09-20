@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import PaginationControls from '../common/PaginationControls';
 import { useModal } from '../common/ModalProvider';
+import { OccupancyService } from '../../services/DatabaseService';
 
 export default function RoomIncomeTab({
   occupancy = [],
@@ -115,6 +116,9 @@ export default function RoomIncomeTab({
     }
 
     try {
+      // Delete from Firebase (shared cloud) first
+      await OccupancyService.delete(record.id).catch(() => {});
+      // Also sync to API (server-side backup)
       await fetch(`/api/room-occupancy/${record.id}`, {
         method: 'DELETE',
         headers: { ...(auth?.headers || {}) }
@@ -160,6 +164,9 @@ export default function RoomIncomeTab({
       }
       setEditingRecord(null);
 
+      // Write to Firebase (shared cloud) first
+      await OccupancyService.update(updated.id, { ...updated, updatedAt: Date.now() }).catch(() => {});
+      // Also sync to API (server-side backup)
       await fetch(`/api/room-occupancy/${updated.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...(auth?.headers || {}) },

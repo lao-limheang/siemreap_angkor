@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import PaginationControls from '../common/PaginationControls';
-import { BookingService } from '../../services/DatabaseService';
+import { BookingService, OccupancyService, RoomService } from '../../services/DatabaseService';
 import { useModal } from '../common/ModalProvider';
 import RoomInvoiceModal from './RoomInvoiceModal';
 
@@ -166,11 +166,24 @@ export default function RoomHistoryTab({
     );
     if (!confirmed) return;
     try {
-      const res = await fetch(`/api/room-occupancy/${record.occupancyId}/checkout`, {
+      // Write to Firebase (shared cloud) first
+      await OccupancyService.update(record.occupancyId, {
+        status: 'checked_out',
+        checkOutActual: new Date().toISOString(),
+        updatedAt: Date.now()
+      }).catch(e => console.warn('Firebase checkout update:', e));
+
+      // Update room status in Firebase
+      if (record.roomId) {
+        RoomService.update(record.roomId, { status: 'cleaning' }).catch(() => {});
+      }
+
+      // Also sync to API (server-side backup, non-blocking)
+      fetch(`/api/room-occupancy/${record.occupancyId}/checkout`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...(auth?.headers || {}) }
-      });
-      if (!res.ok) throw new Error(`Server error ${res.status}`);
+      }).catch(e => console.warn('API checkout sync:', e));
+
       showModal('success', 'Checked Out', `${record.guestName} has been checked out successfully.`);
       if (fetchAll) await fetchAll();
     } catch (err) {
@@ -194,6 +207,9 @@ export default function RoomHistoryTab({
         setOccupancy(prev => (prev || []).filter(o => String(o.id) !== String(record.occupancyId)));
       }
       try {
+        // Delete from Firebase (shared cloud) first
+        await OccupancyService.delete(record.occupancyId).catch(() => {});
+        // Also sync to API (server-side backup)
         await fetch(`/api/room-occupancy/${record.occupancyId}`, {
           method: 'DELETE',
           headers: { ...(auth?.headers || {}) }
@@ -267,6 +283,9 @@ export default function RoomHistoryTab({
           setOccupancy(prev => (prev || []).map(o => String(o.id) === String(editingRecord.occupancyId) ? { ...o, ...updated } : o));
         }
 
+        // Write to Firebase (shared cloud) first
+        await OccupancyService.update(editingRecord.occupancyId, { ...updated, updatedAt: Date.now() }).catch(() => {});
+        // Also sync to API (server-side backup)
         await fetch(`/api/room-occupancy/${editingRecord.occupancyId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', ...(auth?.headers || {}) },

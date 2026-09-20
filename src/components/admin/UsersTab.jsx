@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createSocket } from '../../services/socket';
+import { StaffService } from '../../services/DatabaseService';
 
 export default function UsersTab({
   auth,
@@ -36,9 +37,15 @@ export default function UsersTab({
   const fetchStaff = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/staff', { headers: getHeaders() });
-      const data = await res.json();
-      setStaff(Array.isArray(data) ? data : []);
+      // Read from Firebase first, fallback to API
+      const fbData = await StaffService.getAll().catch(() => []);
+      if (fbData && fbData.length > 0) {
+        setStaff(fbData);
+      } else {
+        const res = await fetch('/api/staff', { headers: getHeaders() });
+        const data = await res.json();
+        setStaff(Array.isArray(data) ? data : []);
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -99,22 +106,21 @@ export default function UsersTab({
     }
 
     try {
-      const res = await fetch('/api/staff', {
+      // Write to Firebase (shared cloud) first
+      await StaffService.create({ ...form, createdAt: Date.now() });
+      // Also sync to API (server-side backup, non-blocking)
+      fetch('/api/staff', {
         method: 'POST',
         headers: getHeaders(),
         body: JSON.stringify(form)
-      });
-      if (res.ok) {
-        setShowModal(false);
-        setForm({ username: '', password: '', fullName: '', role: 'receptionist', phone: '', status: 'active' });
-        fetchStaff();
-        fetchAll?.();
-      } else {
-        const data = await res.json().catch(() => ({}));
-        alert(data.error || 'Failed to create user account.');
-      }
+      }).catch(e => console.warn('API staff create sync:', e));
+
+      setShowModal(false);
+      setForm({ username: '', password: '', fullName: '', role: 'receptionist', phone: '', status: 'active' });
+      fetchStaff();
+      fetchAll?.();
     } catch (err) {
-      alert(err.message);
+      alert(err.message || 'Failed to create user account.');
     }
   };
 
@@ -126,38 +132,36 @@ export default function UsersTab({
     }
 
     try {
-      const res = await fetch(`/api/staff/${editingStaff.id}`, {
+      // Write to Firebase (shared cloud) first
+      await StaffService.update(editingStaff.id, { ...editingStaff, updatedAt: Date.now() });
+      // Also sync to API (server-side backup, non-blocking)
+      fetch(`/api/staff/${editingStaff.id}`, {
         method: 'PUT',
         headers: getHeaders(),
         body: JSON.stringify(editingStaff)
-      });
-      if (res.ok) {
-        setShowEditModal(false);
-        setEditingStaff(null);
-        fetchStaff();
-        fetchAll?.();
-      } else {
-        const data = await res.json().catch(() => ({}));
-        alert(data.error || 'Failed to update user account.');
-      }
+      }).catch(e => console.warn('API staff update sync:', e));
+
+      setShowEditModal(false);
+      setEditingStaff(null);
+      fetchStaff();
+      fetchAll?.();
     } catch (err) {
-      alert(err.message);
+      alert(err.message || 'Failed to update user account.');
     }
   };
 
   const handleDelete = async (id, name) => {
     if (!confirm(`Are you sure you want to remove ${name || 'this staff account'}?`)) return;
     try {
-      const res = await fetch(`/api/staff/${id}`, { method: 'DELETE', headers: getHeaders() });
-      if (res.ok) {
-        fetchStaff();
-        fetchAll?.();
-      } else {
-        const data = await res.json().catch(() => ({}));
-        alert(data.error || 'Failed to delete staff user.');
-      }
+      // Delete from Firebase (shared cloud) first
+      await StaffService.delete(id);
+      // Also sync to API (server-side backup, non-blocking)
+      fetch(`/api/staff/${id}`, { method: 'DELETE', headers: getHeaders() }).catch(e => console.warn('API staff delete sync:', e));
+
+      fetchStaff();
+      fetchAll?.();
     } catch (e) {
-      alert(e.message);
+      alert(e.message || 'Failed to delete staff user.');
     }
   };
 

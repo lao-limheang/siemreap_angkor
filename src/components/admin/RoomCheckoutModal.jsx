@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { OccupancyService, RoomService, InvoiceService } from '../../services/DatabaseService';
 
 export default function RoomCheckoutModal({
   isOpen,
@@ -89,17 +90,29 @@ export default function RoomCheckoutModal({
         totalAmount: grandTotal
       };
 
-      const res = await fetch(`/api/room-occupancy/${occupancy.id}/checkout`, {
+      // Write to Firebase (shared cloud) first
+      await OccupancyService.update(occupancy.id, {
+        ...body,
+        status: 'checked_out',
+        checkOutActual: actualCheckOut,
+        updatedAt: Date.now()
+      }).catch(e => console.warn('Firebase checkout update:', e));
+
+      // Also update Room status in Firebase
+      targetStays.forEach(s => {
+        const rId = s.roomId;
+        if (rId) {
+          RoomService.update(rId, { status: nextRoomStatus }).catch(() => {});
+        }
+      });
+
+      // Also sync to SQLite API (server-side backup, non-blocking)
+      fetch(`/api/room-occupancy/${occupancy.id}/checkout`, {
         method: 'PATCH',
         ...auth,
         headers: { 'Content-Type': 'application/json', ...(auth?.headers || {}) },
         body: JSON.stringify(body)
-      });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'Failed to complete check-out');
-      }
+      }).catch(err => console.warn('SQLite checkout sync notice:', err));
 
       // Prepare consolidated folio data for printing
       const customItems = [
@@ -144,6 +157,14 @@ export default function RoomCheckoutModal({
         invoiceNumber: `INV-CO-${occupancy.id}-${todayStr.replace(/-/g, '')}`,
         roomNames: targetStays.map(s => s.roomName || s.roomId).join(', ')
       };
+
+      // Save to Firebase Invoices collection for real-time tracking
+      InvoiceService.create({
+        ...consolidatedInvoiceData,
+        type: 'room',
+        invoiceType: 'room',
+        createdAt: Date.now()
+      }).catch(err => console.warn('Invoice save notice:', err));
 
       if (andPrint && onCheckoutSuccessAndPrint) {
         onCheckoutSuccessAndPrint(consolidatedInvoiceData, targetStays);

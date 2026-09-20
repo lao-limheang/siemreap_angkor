@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ContactSkeleton } from './Skeleton';
+import { ContactService } from '../services/DatabaseService';
 
 export default function Contact({ data, loading = false }) {
   const info = data || {};
@@ -41,6 +42,9 @@ export default function Contact({ data, loading = false }) {
     setSubmitting(true);
     setError(null);
     try {
+      // Write to Firebase (shared cloud) first
+      await ContactService.create({ ...form, createdAt: Date.now() }).catch(() => {});
+      // Also sync to API (server-side backup for Telegram notifications)
       const res = await fetch('/api/contact', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

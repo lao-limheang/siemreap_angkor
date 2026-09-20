@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { User, X, Quote } from 'lucide-react';
 import { TestimonialsSkeleton } from './Skeleton';
 import { asArray } from '../utils/dataNormalizer';
+import { ReviewService } from '../services/DatabaseService';
 
 /* ─── Gold palette ─── */
 const GOLD = {
@@ -495,10 +496,14 @@ export default function Testimonials({ data, loading = false }) {
                         }
                         setIsSubmitting(true);
                         try {
+                          const reviewData = { name, country, rating: formRating, text };
+                          // Write to Firebase (shared cloud) first
+                          await ReviewService.create({ ...reviewData, createdAt: Date.now() }).catch(() => {});
+                          // Also sync to API (server-side backup)
                           const res = await fetch('/api/public-reviews', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ name, country, rating: formRating, text })
+                            body: JSON.stringify(reviewData)
                           });
                           if (res.ok) {
                             setSubmitSuccess(true);

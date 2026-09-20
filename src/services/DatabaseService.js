@@ -118,13 +118,81 @@ export const UserService = new BaseModel(dbMotos, 'users');
 export const CustomizerService = new BaseModel(dbMotos, 'customizer_settings');
 export const PublicSettingsService = new BaseModel(dbMotos, 'public_settings');
 
-// Fallback services
-export const OccupancyService = new BaseModel(dbRooms, 'occupancy');
-export const InvoiceService = new BaseModel(dbRooms, 'invoices');
-export const HousekeepingService = new BaseModel(dbRooms, 'housekeeping');
-export const GuestService = new BaseModel(dbRooms, 'guests');
-export const StaffService = new BaseModel(dbRooms, 'staff');
-export const AuditLogService = new BaseModel(dbRooms, 'audit-logs');
+// ─── ALL SHARED SERVICES (using chafe-2026 so data is same everywhere) ─────
+export const OccupancyService = new BaseModel(dbMotos, 'room_occupancy');
+export const InvoiceService = new BaseModel(dbMotos, 'invoices');
+export const HousekeepingService = new BaseModel(dbMotos, 'housekeeping');
+export const GuestService = new BaseModel(dbMotos, 'guests');
+export const StaffService = new BaseModel(dbMotos, 'staff');
+export const AuditLogService = new BaseModel(dbMotos, 'audit_logs');
+export const SettingsService = new BaseModel(dbMotos, 'settings');
+export const ContactService = new BaseModel(dbMotos, 'contacts');
+export const ReviewService = new BaseModel(dbMotos, 'reviews');
+
+/**
+ * DualWriteModel: Wraps a Firebase BaseModel service and also calls the SQLite
+ * API endpoint for backward compatibility (Telegram alerts, server-side logic).
+ * Firebase is the primary data source; SQLite API call is fire-and-forget.
+ */
+export class DualWriteModel {
+  constructor(firebaseService, apiPath, getToken) {
+    this.fb = firebaseService;
+    this.apiPath = apiPath;
+    this.getToken = getToken || (() => localStorage.getItem('token'));
+  }
+
+  _headers() {
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${this.getToken()}`
+    };
+  }
+
+  async getAll() {
+    const fbData = await this.fb.getAll();
+    if (fbData && fbData.length > 0) return fbData;
+    // Fallback to API
+    try {
+      const res = await fetch(this.apiPath, { headers: this._headers() });
+      return res.ok ? await res.json() : [];
+    } catch { return []; }
+  }
+
+  subscribe(callback, sortFn) {
+    return this.fb.subscribe(callback, sortFn);
+  }
+
+  async create(data) {
+    const fbResult = await this.fb.create(data);
+    // Fire-and-forget API sync
+    fetch(this.apiPath, {
+      method: 'POST',
+      headers: this._headers(),
+      body: JSON.stringify({ ...data, firebaseId: fbResult.id })
+    }).catch(() => {});
+    return fbResult;
+  }
+
+  async update(id, data) {
+    const fbResult = await this.fb.update(id, data);
+    // Fire-and-forget API sync
+    fetch(`${this.apiPath}/${id}`, {
+      method: 'PUT',
+      headers: this._headers(),
+      body: JSON.stringify(data)
+    }).catch(() => {});
+    return fbResult;
+  }
+
+  async delete(id) {
+    await this.fb.delete(id);
+    // Fire-and-forget API sync
+    fetch(`${this.apiPath}/${id}`, {
+      method: 'DELETE',
+      headers: this._headers()
+    }).catch(() => {});
+  }
+}
 
 // ─── SYNC HELPERS (Two-Way Realtime with https://checkin-chafe1.web.app/motor.html) ─────
 

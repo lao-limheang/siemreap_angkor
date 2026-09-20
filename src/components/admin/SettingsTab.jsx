@@ -4,6 +4,7 @@ import { doc, setDoc } from 'firebase/firestore';
 import { dbMotos } from '../../firebase';
 import { fileToBase64 } from '../../utils/imageUtils';
 import { asArray } from '../../utils/dataNormalizer';
+import { StaffService } from '../../services/DatabaseService';
 
 // Preset color options for Dashboard Customizer
 const COLOR_PRESETS = [
@@ -702,9 +703,13 @@ export default function SettingsTab({
   const handleSaveStaff = async (e) => {
     e.preventDefault();
     if (editingStaff) {
-      await fetch(`/api/staff/${editingStaff.id}`, authPatch(staffForm));
+      // Write to Firebase (shared cloud) first
+      await StaffService.update(editingStaff.id, { ...staffForm, updatedAt: Date.now() }).catch(() => {});
+      fetch(`/api/staff/${editingStaff.id}`, authPatch(staffForm)).catch(() => {});
     } else {
-      await fetch('/api/staff', authPost(staffForm));
+      // Write to Firebase (shared cloud) first
+      await StaffService.create({ ...staffForm, createdAt: Date.now() }).catch(() => {});
+      fetch('/api/staff', authPost(staffForm)).catch(() => {});
     }
     setStaffModalOpen(false);
     fetchAll();
@@ -712,7 +717,9 @@ export default function SettingsTab({
 
   const handleDeleteStaff = async (id) => {
     if (!await showConfirm('Delete Staff', 'Are you sure you want to delete this staff account?', 'Delete', 'danger')) return;
-    await fetch(`/api/staff/${id}`, authDelete());
+    // Delete from Firebase (shared cloud) first
+    await StaffService.delete(id).catch(() => {});
+    fetch(`/api/staff/${id}`, authDelete()).catch(() => {});
     fetchAll();
   };
 

@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useModal } from '../common/ModalProvider';
-import { RoomService, BedCategoryService } from '../../services/DatabaseService';
+import { RoomService, BedCategoryService, OccupancyService } from '../../services/DatabaseService';
 import { fileToBase64 } from '../../utils/imageUtils';
 import RoomBookingsTab from './RoomBookingsTab';
 import RoomInvoiceModal from './RoomInvoiceModal';
@@ -626,20 +626,26 @@ export default function RoomsTab({
     const roomNamesList = selectedRooms.map(r => r.name || `Room ${r.id}`);
 
     try {
-      await fetch('/api/room-occupancy', {
+      const occupancyPayload = {
+        ...checkInForm,
+        roomId: targetRoomIds[0],
+        roomIds: targetRoomIds,
+        roomName: primaryRoomName,
+        roomNames: roomNamesList,
+        price: primaryRoom?.price || primaryRoom?.rate || 25,
+        bedCount: checkInForm.bedCount || primaryRoom?.bedCount || 1,
+        status: 'active',
+        createdAt: Date.now()
+      };
+      // Write to Firebase (shared cloud) first
+      await OccupancyService.create(occupancyPayload).catch(() => {});
+      // Also sync to SQLite API (server-side backup for Telegram, etc.)
+      fetch('/api/room-occupancy', {
         method: 'POST',
         ...auth,
         headers: { 'Content-Type': 'application/json', ...(auth?.headers || {}) },
-        body: JSON.stringify({
-          ...checkInForm,
-          roomId: targetRoomIds[0],
-          roomIds: targetRoomIds,
-          roomName: primaryRoomName,
-          roomNames: roomNamesList,
-          price: primaryRoom?.price || primaryRoom?.rate || 25,
-          bedCount: checkInForm.bedCount || primaryRoom?.bedCount || 1
-        })
-      });
+        body: JSON.stringify(occupancyPayload)
+      }).catch(() => {});
 
       // Also sync room status in Firestore if RoomService is available
       selectedRooms.forEach(r => {

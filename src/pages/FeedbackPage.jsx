@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { ReviewService } from '../services/DatabaseService';
 
 export default function FeedbackPage({ publicSettings }) {
   const [rating, setRating] = useState(5);
@@ -26,15 +27,19 @@ export default function FeedbackPage({ publicSettings }) {
     setError('');
 
     try {
+      const reviewData = {
+        name: name.trim() || 'Anonymous Guest',
+        country: country.trim() || 'Guest',
+        rating: Number(rating) || 5,
+        text: `[${service}] ${text.trim()}`
+      };
+      // Write to Firebase (shared cloud) first
+      await ReviewService.create({ ...reviewData, createdAt: Date.now() }).catch(() => {});
+      // Also sync to API (server-side backup)
       const res = await fetch('/api/public-reviews', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: name.trim() || 'Anonymous Guest',
-          country: country.trim() || 'Guest',
-          rating: Number(rating) || 5,
-          text: `[${service}] ${text.trim()}`
-        })
+        body: JSON.stringify(reviewData)
       });
 
       if (res.ok) {

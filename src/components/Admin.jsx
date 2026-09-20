@@ -16,7 +16,14 @@ import {
   ExpenseService,
   MaintenanceService,
   ReturnService,
-  HotelBookingService
+  HotelBookingService,
+  OccupancyService,
+  InvoiceService,
+  HousekeepingService,
+  StaffService,
+  AuditLogService,
+  GuestService,
+  SettingsService
 } from '../services/DatabaseService';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import CheckoutTab from './admin/CheckoutTab';
@@ -206,20 +213,31 @@ export default function Admin() {
     if (!token) return;
     try {
       const hdrs = { headers: { 'Content-Type':'application/json', 'Authorization': `Bearer ${token}` } };
+      // Read from Firebase (cloud, shared) first; fall back to SQLite API
+      const fbOrApi = async (fbService, apiPath) => {
+        try {
+          const fbData = await fbService.getAll();
+          if (fbData && fbData.length > 0) return fbData;
+        } catch {}
+        try {
+          const res = await fetch(apiPath, hdrs);
+          return res.ok ? await res.json() : [];
+        } catch { return []; }
+      };
       const [b, mdls, r, bk, oc, rn, inv, hk, mnt, g, stf, logs, cats] = await Promise.all([
         MotoService.getAll().catch(()=>[]),
         BikeModelService.getAll().catch(()=>[]),
         RoomService.getAll().catch(()=>[]),
-        BookingService.getAll().then(res => res && res.length ? res : fetch('/api/bookings', hdrs).then(r=>r.json()).catch(()=>[])).catch(()=>[]),
-        fetch('/api/room-occupancy', hdrs).then(r=>r.json()).catch(()=>[]),
-        RentalService.getAll().then(res => res && res.length ? res : fetch('/api/rentals', hdrs).then(r=>r.json()).catch(()=>[])).catch(()=>[]),
-        fetch('/api/invoices', hdrs).then(r=>r.json()).catch(()=>[]),
-        fetch('/api/housekeeping', hdrs).then(r=>r.json()).catch(()=>[]),
-        MaintenanceService.getAll().then(res => res && res.length ? res : fetch('/api/maintenance', hdrs).then(r=>r.json()).catch(()=>[])).catch(()=>[]),
-        CustomerService.getAll().then(res => res && res.length ? res : fetch('/api/guests', hdrs).then(r=>r.json()).catch(()=>[])).catch(()=>[]),
-        fetch('/api/staff', hdrs).then(r=>r.json()).catch(()=>[]),
-        fetch('/api/audit-logs', hdrs).then(r=>r.json()).catch(()=>[]),
-        BedCategoryService.getAll().then(res => res && res.length ? res : fetch('/api/bed-categories', hdrs).then(r=>r.json()).catch(()=>[])).catch(()=>[]),
+        fbOrApi(BookingService, '/api/bookings'),
+        fbOrApi(OccupancyService, '/api/room-occupancy'),
+        fbOrApi(RentalService, '/api/rentals'),
+        fbOrApi(InvoiceService, '/api/invoices'),
+        fbOrApi(HousekeepingService, '/api/housekeeping'),
+        fbOrApi(MaintenanceService, '/api/maintenance'),
+        fbOrApi(CustomerService, '/api/guests'),
+        fbOrApi(StaffService, '/api/staff'),
+        fbOrApi(AuditLogService, '/api/audit-logs'),
+        fbOrApi(BedCategoryService, '/api/bed-categories'),
       ]);
       const safeGuests = Array.isArray(g) ? g : [];
       const safeModels = mapSafe(mdls, normalizeModel);
@@ -266,8 +284,18 @@ export default function Admin() {
     }
   }, [token, reportPeriod]);
 
-  const fetchSettings = useCallback(() => {
+  const fetchSettings = useCallback(async () => {
     if (!token) return;
+    try {
+      const fbSnap = await getDoc(doc(dbMotos, 'settings', 'public_settings'));
+      if (fbSnap.exists()) {
+        const data = fbSnap.data();
+        setSettings(prev => ({ ...prev, ...data }));
+        return;
+      }
+    } catch (e) {
+      console.warn('Firestore settings fetch fallback:', e);
+    }
     const hdrs = { headers: { 'Content-Type':'application/json', 'Authorization': `Bearer ${token}` } };
     fetch('/api/settings', hdrs)
       .then(r => r.json())
@@ -362,6 +390,25 @@ export default function Admin() {
         fetchDash();
       }
     });
+    // ─── Firebase listeners for previously SQLite-only collections ───
+    const unsubOccupancy = OccupancyService.subscribe((data) => {
+      if (data) setOccupancy(Array.isArray(data) ? data : []);
+    });
+    const unsubInvoices = InvoiceService.subscribe((data) => {
+      if (data) setInvoices(Array.isArray(data) ? data : []);
+    });
+    const unsubHousekeeping = HousekeepingService.subscribe((data) => {
+      if (data) setHousekeeping(Array.isArray(data) ? data : []);
+    });
+    const unsubStaff = StaffService.subscribe((data) => {
+      if (data) setStaff(Array.isArray(data) ? data : []);
+    });
+    const unsubAuditLogs = AuditLogService.subscribe((data) => {
+      if (data) setAuditLogs(Array.isArray(data) ? data : []);
+    });
+    const unsubGuests = GuestService.subscribe((data) => {
+      if (data && data.length > 0) setGuests(data);
+    });
 
     const playChime = () => {
       try {
@@ -420,6 +467,12 @@ export default function Admin() {
       unsubMaintenance();
       unsubHBookings();
       unsubExpenses();
+      unsubOccupancy();
+      unsubInvoices();
+      unsubHousekeeping();
+      unsubStaff();
+      unsubAuditLogs();
+      unsubGuests();
       socket.disconnect();
     };
   }, [token]);
@@ -1781,14 +1834,18 @@ function BillingTab({ invoices, occupancy, rentals, auth, fetchAll, inputCls, la
 
   const handleCreate = async (e) => {
     e.preventDefault();
-    await fetch('/api/invoices', { method:'POST', ...auth, body: JSON.stringify(form) });
+    // Write to Firebase (shared cloud) + API (server-side backup)
+    await InvoiceService.create({ ...form, status: 'unpaid', createdAt: Date.now() }).catch(() => {});
+    fetch('/api/invoices', { method:'POST', ...auth, body: JSON.stringify(form) }).catch(() => {});
     fetchAll();
     setForm({ guestName:'', guestPhone:'', roomOccupancyId:'', rentalId:'', roomCharge:0, bikeCharge:0, lateFee:0, damageFee:0, extras:0, extrasNote:'', discount:0, paymentMethod:'cash', notes:'' });
   };
   const handlePay = async (id) => {
     const method = prompt('Payment method: cash / aba / khqr / card', 'cash');
     if (!method) return;
-    await fetch(`/api/invoices/${id}/pay`, { method:'PATCH', ...auth, body: JSON.stringify({ paymentMethod:method }) });
+    // Write to Firebase (shared cloud) + API (server-side backup)
+    await InvoiceService.update(id, { status: 'paid', paymentMethod: method, paidAt: Date.now() }).catch(() => {});
+    fetch(`/api/invoices/${id}/pay`, { method:'PATCH', ...auth, body: JSON.stringify({ paymentMethod:method }) }).catch(() => {});
     fetchAll();
   };
 
@@ -1942,16 +1999,22 @@ function HousekeepingTab({ rooms, housekeeping, maintenance, bikes, auth, fetchA
 
   const addTask = async (e) => {
     e.preventDefault();
-    await fetch('/api/housekeeping', { method:'POST', ...auth, body: JSON.stringify(hkForm) });
+    // Write to Firebase (shared cloud) + API (server-side backup)
+    await HousekeepingService.create({ ...hkForm, status: 'pending', createdAt: Date.now() }).catch(() => {});
+    fetch('/api/housekeeping', { method:'POST', ...auth, body: JSON.stringify(hkForm) }).catch(() => {});
     fetchAll(); setHkForm({ roomId:'', taskType:'clean', assignedTo:'', notes:'', scheduledDate:today() });
   };
   const completeTask = async (id) => {
-    await fetch(`/api/housekeeping/${id}/complete`, { method:'PATCH', ...auth });
+    // Write to Firebase (shared cloud) + API (server-side backup)
+    await HousekeepingService.update(id, { status: 'completed', completedAt: Date.now() }).catch(() => {});
+    fetch(`/api/housekeeping/${id}/complete`, { method:'PATCH', ...auth }).catch(() => {});
     fetchAll(); fetchDash();
   };
   const addMaintenance = async (e) => {
     e.preventDefault();
-    await fetch('/api/maintenance', { method:'POST', ...auth, body: JSON.stringify(mntForm) });
+    // Write to Firebase (shared cloud) + API (server-side backup)
+    await MaintenanceService.create({ ...mntForm, createdAt: Date.now() }).catch(() => {});
+    fetch('/api/maintenance', { method:'POST', ...auth, body: JSON.stringify(mntForm) }).catch(() => {});
     fetchAll(); setMntForm({ bikeId:'', logType:'oil_change', description:'', cost:0, performedBy:'', nextServiceDate:'' });
   };
 
@@ -2700,12 +2763,16 @@ function GuestsTab({ guests, auth, fetchAll, inputCls, labelCls, cardCls, btnPri
 
   const handleAdd = async (e) => {
     e.preventDefault();
-    await fetch('/api/guests', { method:'POST', ...auth, body: JSON.stringify(form) });
+    // Write to Firebase (shared cloud) + API (server-side backup)
+    await GuestService.create({ ...form, createdAt: Date.now() }).catch(() => {});
+    fetch('/api/guests', { method:'POST', ...auth, body: JSON.stringify(form) }).catch(() => {});
     fetchAll(); setForm({ name:'', phone:'', email:'', nationality:'', passportId:'', notes:'' });
   };
   const handleDelete = async (id) => {
     if (!await showConfirm('Delete Guest', 'Are you sure you want to delete this guest record?', 'Delete', 'danger')) return;
-    await fetch(`/api/guests/${id}`, { method:'DELETE', ...auth });
+    // Delete from Firebase (shared cloud) + API (server-side backup)
+    await GuestService.delete(id).catch(() => {});
+    fetch(`/api/guests/${id}`, { method:'DELETE', ...auth }).catch(() => {});
     fetchAll();
   };
 

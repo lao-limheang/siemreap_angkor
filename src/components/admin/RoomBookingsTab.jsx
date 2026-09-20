@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useModal } from '../common/ModalProvider';
-import { BookingService, HotelBookingService, syncBookingToOldSystem } from '../../services/DatabaseService';
+import { BookingService, HotelBookingService, OccupancyService, syncBookingToOldSystem } from '../../services/DatabaseService';
 
 export default function RoomBookingsTab({
   bookings = [],
@@ -254,6 +254,9 @@ export default function RoomBookingsTab({
         notes: `Booking Ref: ${booking.bookingRef || booking.id}. ${booking.specialRequests || ''}`.trim()
       };
 
+      // Write to Firebase (shared cloud) first
+      await OccupancyService.create({ ...occupancyPayload, status: 'active', createdAt: Date.now() }).catch(() => {});
+      // Also sync to API (server-side backup)
       const occupancyRes = await fetch('/api/room-occupancy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(auth?.headers || {}) },
