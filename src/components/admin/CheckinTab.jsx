@@ -124,7 +124,11 @@ export default function CheckinTab({
           phone: selectedRental.guestPhone || selectedRental.phone || '',
           bikeName: selectedRental.bikeName,
           plateNumber: selectedRental.plateNumber || '',
-          deposit: selectedRental.deposit || 0
+          deposit: selectedRental.deposit != null ? selectedRental.deposit : 0,
+          totalPrice: selectedRental.totalPrice != null ? selectedRental.totalPrice : (selectedRental.total || 0),
+          total_amount: selectedRental.totalPrice != null ? selectedRental.totalPrice : (selectedRental.total || 0),
+          startDate: selectedRental.startDate || '',
+          endDate: selectedRental.endDate || ''
         })
       }).catch(err => console.warn('SQLite return sync notice:', err));
 

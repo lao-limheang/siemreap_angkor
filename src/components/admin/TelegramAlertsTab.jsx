@@ -10,6 +10,7 @@ export default function TelegramAlertsTab({
 }) {
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
+  const [selectedLang, setSelectedLang] = useState('kh'); // 'kh' | 'en'
   const [sending, setSending] = useState(false);
   const [statusMessage, setStatusMessage] = useState(null);
 
@@ -23,13 +24,14 @@ export default function TelegramAlertsTab({
         body: JSON.stringify({
           type,
           subject: customSubject,
-          message: customMessage
+          message: customMessage,
+          lang: selectedLang
         })
       });
 
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        setStatusMessage({ type: 'success', text: 'Telegram alert sent successfully!' });
+        setStatusMessage({ type: 'success', text: `Telegram alert (${selectedLang.toUpperCase()}) sent successfully!` });
         if (type === 'custom') {
           setSubject('');
           setMessage('');
@@ -48,14 +50,14 @@ export default function TelegramAlertsTab({
   const handleCustomSubmit = (e) => {
     e.preventDefault();
     if (!message.trim()) return;
-    sendAlert('custom', subject.trim() || 'Custom Announcement', message.trim());
+    sendAlert('custom', subject.trim() || (selectedLang === 'kh' ? 'សេចក្តីជូនដំណឹងទូទៅ' : 'General Announcement'), message.trim());
   };
 
   return (
     <div className="space-y-6 max-w-4xl">
       {/* Header */}
       <div className={`${cardCls} p-5 sm:p-6`}>
-        <div className="flex items-center justify-between border-b border-stone-100 pb-4 mb-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-stone-100 pb-4 mb-5">
           <div>
             <h3 className="font-display font-bold text-xl text-stone-900 flex items-center gap-2">
               <i className="fa-brands fa-telegram text-sky-500"></i>
@@ -65,13 +67,42 @@ export default function TelegramAlertsTab({
               Send instant operational updates, reminders, and custom messages directly to your staff Telegram channel.
             </p>
           </div>
-          <button
-            onClick={() => sendAlert('test')}
-            disabled={sending}
-            className={`${btnSecondary} text-xs flex items-center gap-1.5`}
-          >
-            <i className="fa-solid fa-satellite-dish text-sky-500"></i> Test Bot Connection
-          </button>
+          
+          <div className="flex items-center gap-2">
+            {/* Language Selector KH / EN */}
+            <div className="inline-flex p-1 bg-stone-100 rounded-xl border border-stone-200">
+              <button
+                type="button"
+                onClick={() => setSelectedLang('kh')}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                  selectedLang === 'kh' ? 'bg-white text-stone-900 shadow-2xs' : 'text-stone-500 hover:text-stone-800'
+                }`}
+                title="ផ្ញើសារជាភាសាខ្មែរ"
+              >
+                <span>🇰🇭</span>
+                <span>ខ្មែរ (KH)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedLang('en')}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                  selectedLang === 'en' ? 'bg-white text-stone-900 shadow-2xs' : 'text-stone-500 hover:text-stone-800'
+                }`}
+                title="Send messages in English"
+              >
+                <span>🇬🇧</span>
+                <span>EN</span>
+              </button>
+            </div>
+
+            <button
+              onClick={() => sendAlert('test')}
+              disabled={sending}
+              className={`${btnSecondary} text-xs flex items-center gap-1.5`}
+            >
+              <i className="fa-solid fa-satellite-dish text-sky-500"></i> Test Connection
+            </button>
+          </div>
         </div>
 
         {statusMessage && (
@@ -87,52 +118,65 @@ export default function TelegramAlertsTab({
 
         {/* Quick Send Preset Buttons */}
         <div className="mb-6">
-          <h4 className="text-xs font-bold text-stone-600 uppercase tracking-wider mb-3">
-            Quick One-Click Alerts (ផ្ញើ Alert ភ្លាមៗ)
-          </h4>
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-xs font-bold text-stone-600 uppercase tracking-wider">
+              Quick One-Click Alerts (ផ្ញើ Alert ភ្លាមៗ)
+            </h4>
+            <span className="text-[11px] font-bold text-stone-400">
+              Active Language: <strong className="text-brand-600">{selectedLang === 'kh' ? '🇰🇭 ភាសាខ្មែរ' : '🇬🇧 English'}</strong>
+            </span>
+          </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <button
               onClick={() => sendAlert('dashboard')}
               disabled={sending}
-              className="p-4 bg-stone-50 hover:bg-stone-100/80 border border-stone-200/80 rounded-2xl flex flex-col items-center justify-center gap-2 transition group text-center"
+              className="p-4 bg-stone-50 hover:bg-stone-100/80 border border-stone-200/80 rounded-2xl flex flex-col items-center justify-center gap-2 transition group text-center cursor-pointer shadow-2xs"
             >
               <div className="w-10 h-10 rounded-xl bg-brand-500/10 text-brand-600 flex items-center justify-center text-lg group-hover:scale-110 transition-transform">
                 <i className="fa-solid fa-gauge"></i>
               </div>
-              <span className="text-xs font-bold text-stone-700">Dashboard Summary</span>
+              <span className="text-xs font-bold text-stone-700">
+                {selectedLang === 'kh' ? 'សង្ខេបប្រតិបត្តិការ' : 'Dashboard Summary'}
+              </span>
             </button>
 
             <button
               onClick={() => sendAlert('motos')}
               disabled={sending}
-              className="p-4 bg-stone-50 hover:bg-stone-100/80 border border-stone-200/80 rounded-2xl flex flex-col items-center justify-center gap-2 transition group text-center"
+              className="p-4 bg-stone-50 hover:bg-stone-100/80 border border-stone-200/80 rounded-2xl flex flex-col items-center justify-center gap-2 transition group text-center cursor-pointer shadow-2xs"
             >
               <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center text-lg group-hover:scale-110 transition-transform">
                 <i className="fa-solid fa-motorcycle"></i>
               </div>
-              <span className="text-xs font-bold text-stone-700">ស្ថានភាពម៉ូតូ (Fleet)</span>
+              <span className="text-xs font-bold text-stone-700">
+                {selectedLang === 'kh' ? 'ស្ថានភាពម៉ូតូ (Fleet)' : 'Motor Fleet Status'}
+              </span>
             </button>
 
             <button
               onClick={() => sendAlert('overdue')}
               disabled={sending}
-              className="p-4 bg-rose-50/60 hover:bg-rose-50 border border-rose-200/80 rounded-2xl flex flex-col items-center justify-center gap-2 transition group text-center"
+              className="p-4 bg-rose-50/60 hover:bg-rose-50 border border-rose-200/80 rounded-2xl flex flex-col items-center justify-center gap-2 transition group text-center cursor-pointer shadow-2xs"
             >
               <div className="w-10 h-10 rounded-xl bg-rose-500/10 text-rose-600 flex items-center justify-center text-lg group-hover:scale-110 transition-transform">
                 <i className="fa-solid fa-triangle-exclamation"></i>
               </div>
-              <span className="text-xs font-bold text-rose-700">Overdue Warning</span>
+              <span className="text-xs font-bold text-rose-700">
+                {selectedLang === 'kh' ? 'ការជូនដំណឹងហួសពេល' : 'Overdue Warning'}
+              </span>
             </button>
 
             <button
               onClick={() => sendAlert('income')}
               disabled={sending}
-              className="p-4 bg-stone-50 hover:bg-stone-100/80 border border-stone-200/80 rounded-2xl flex flex-col items-center justify-center gap-2 transition group text-center"
+              className="p-4 bg-stone-50 hover:bg-stone-100/80 border border-stone-200/80 rounded-2xl flex flex-col items-center justify-center gap-2 transition group text-center cursor-pointer shadow-2xs"
             >
               <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center text-lg group-hover:scale-110 transition-transform">
                 <i className="fa-solid fa-hand-holding-dollar"></i>
               </div>
-              <span className="text-xs font-bold text-stone-700">ចំណូល (Income Alert)</span>
+              <span className="text-xs font-bold text-stone-700">
+                {selectedLang === 'kh' ? 'ចំណូល (Income Alert)' : 'Income / Revenue'}
+              </span>
             </button>
           </div>
         </div>

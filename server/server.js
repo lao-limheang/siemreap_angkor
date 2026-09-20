@@ -210,6 +210,7 @@ const db = new sqlite3.Database(databasePath, (err) => {
 
     db.run("ALTER TABLE room_occupancy ADD COLUMN totalPrice REAL", () => {});
     db.run("ALTER TABLE room_occupancy ADD COLUMN paymentMethod TEXT DEFAULT 'cash'", () => {});
+    db.run("ALTER TABLE room_occupancy ADD COLUMN passportOrId TEXT", () => {});
     db.run("ALTER TABLE rentals ADD COLUMN totalPrice REAL DEFAULT 0", () => {});
     db.run("ALTER TABLE rentals ADD COLUMN lateFee REAL DEFAULT 0", () => {});
     db.run("ALTER TABLE rentals ADD COLUMN paymentType TEXT DEFAULT 'cash'", () => {});
@@ -607,6 +608,33 @@ async function getTelegramCredentials() {
   });
 }
 
+const DEFAULT_ALERT_TEMPLATES = {
+  kh: {
+    rental: '🛵 <b>[ការចេញដំណើរម៉ូតូ / MOTOR CHECK-OUT]</b>\n\n👤 អតិថិជន: <b>{customer_name}</b>\n📞 ទូរស័ព្ទ: {phone}\n🏍️ ម៉ាកម៉ូតូ: <b>{bike_model}</b> ({plate_number})\n📅 កាលបរិច្ឆេទ: {start_date} ដល់ {end_date}\n💰 តម្លៃសរុប: ${total_amount} | ប្រាក់កក់: ${deposit}\n💳 បង់ប្រាក់: {payment_method}\n👨‍💼 បុគ្គលិក: {staff_name}\n🕒 ម៉ោង: {time}',
+    return: '🏁 <b>[ការប្រគល់ម៉ូតូត្រឡប់ / MOTOR RETURN & CHECK-IN]</b>\n\n👤 អតិថិជន: <b>{customer_name}</b>\n🏍️ ម៉ាកម៉ូតូ: <b>{bike_model}</b> ({plate_number})\n📅 ថ្ងៃត្រឡប់: {return_date}\n💵 ថ្លៃយឺត: ${late_fee} | ថ្លៃខូចខាត: ${damage_fee}\n✅ ប្រាក់តម្កល់បានប្រគល់: ${deposit_returned}\n👨‍💼 បុគ្គលិកទទួល: {staff_name}\n🕒 ម៉ោង: {time}',
+    room_checkin: '🏨 <b>[ភ្ញៀវចូលស្នាក់នៅ / ROOM CHECK-IN]</b>\n\n🚪 បន្ទប់: <b>{room_name}</b>\n🛏️ ប្រភេទគ្រែ: <b>{bed_type}</b>\n👤 ភ្ញៀវ: <b>{guest_name}</b>\n📞 ទូរស័ព្ទ: {phone}\n📅 ស្នាក់នៅ: {check_in_date} ដល់ {check_out_date}\n💰 តម្លៃបន្ទប់: ${total_price}\n💳 បង់ប្រាក់: {payment_method}\n👨‍💼 បុគ្គលិកទទួល: {staff_name}\n🕒 ម៉ោង: {time}',
+    room_checkout: '🚪 <b>[ភ្ញៀវចេញពីបន្ទប់ / ROOM CHECK-OUT]</b>\n\n🚪 បន្ទប់: <b>{room_name}</b>\n👤 ភ្ញៀវ: <b>{guest_name}</b>\n📞 ទូរស័ព្ទ: {phone}\n📅 កាលបរិច្ឆេទ: {check_in_date} ដល់ {check_out_date}\n🧹 ស្ថានភាព: <b>ត្រូវការសម្អាត (Housekeeping Required)</b>\n👨‍💼 បុគ្គលិក: {staff_name}\n🕒 ម៉ោង: {time}',
+    booking: '🔔 <b>[ការកក់ថ្មី / NEW BOOKING ALERT]</b>\n\n🔖 លេខកក់: <code>{booking_ref}</code>\n🏷️ ប្រភេទ: <b>{type}</b>\n📌 ព័ត៌មាន: <b>{item_name}</b>\n👤 អតិថិជន: <b>{customer_name}</b>\n📞 ទូរស័ព្ទ: {phone}\n📅 កាលបរិច្ឆេទ: {start_date} ដល់ {end_date}\n💰 តម្លៃប៉ាន់ស្មាន: ${total_amount}\n🕒 ម៉ោង: {time}',
+    revenue: '💰 <b>[ចំណូលទទួលបាន / PAYMENT RECEIVED]</b>\n\n🧾 វិក្កយបត្រ: <b>#{invoice_id}</b>\n👤 អតិថិជន: <b>{customer_name}</b>\n💵 ចំនួនទឹកប្រាក់: <b>${amount}</b>\n💳 វិធីទូទាត់: <b>{payment_method}</b>\n🕒 ម៉ោង: {time}',
+    maintenance: '🛠️ <b>[ការថែទាំ & ជួសជុល / MAINTENANCE ALERT]</b>\n\n🏷️ ប្រភេទ: <b>{service_type}</b>\n📌 គោលដៅ: <b>{target_name}</b>\n📝 ការពិពណ៌នា: {description}\n💵 ការចំណាយ: ${cost}\n👨‍🔧 ជាងទទួលបន្ទុក: {technician}\n🕒 ម៉ោង: {time}',
+    overdue: '⚠️ <b>[ការជូនដំណឹងហួសកាលកំណត់ / OVERDUE WARNING]</b>\n\n📌 ប្រធានបទ: <b>{subject}</b>\n👤 អតិថិជន: <b>{customer_name}</b>\n📞 ទូរស័ព្ទ: {phone}\n🏷️ ព័ត៌មាន: <b>{item_name}</b>\n⏰ ហួសកំណត់: {overdue_duration}\n⚠️ សូមទំនាក់ទំនងទៅកាន់អតិថិជនជាបន្ទាន់\n🕒 ម៉ោង: {time}',
+    dashboard: '📊 <b>[សេចក្តីសង្ខេបប្រតិបត្តិការ / DAILY OPERATIONS SUMMARY]</b>\n\n🏨 បន្ទប់កំពុងស្នាក់នៅ: <b>{occupied_rooms}</b> / ទំនេរ: <b>{vacant_rooms}</b>\n🛵 ម៉ូតូកំពុងជួល: <b>{active_rentals}</b> / ក្នុងស្តុក: <b>{available_bikes}</b>\n💰 ចំណូលថ្ងៃនេះ: <b>${today_revenue}</b>\n🔔 ការកក់ថ្មី: <b>{new_bookings}</b>\n🕒 <i>{time}</i>',
+    system: '📢 <b>[សេចក្ដីជូនដំណឹងបុគ្គលិក / STAFF ANNOUNCEMENT]</b>\n\n📌 <b>{title}</b>\n\n{message}\n\n🕒 <i>{time}</i>\n👤 <i>ផ្ញើដោយ: {staff_name}</i>'
+  },
+  en: {
+    rental: '🛵 <b>[MOTORBIKE RENTAL CHECK-OUT]</b>\n\n👤 Customer: <b>{customer_name}</b>\n📞 Phone: {phone}\n🏍️ Motorcycle: <b>{bike_model}</b> ({plate_number})\n📅 Period: {start_date} to {end_date}\n💰 Total: ${total_amount} | Deposit: ${deposit}\n💳 Payment: {payment_method}\n👨‍💼 Staff: {staff_name}\n🕒 Time: {time}',
+    return: '🏁 <b>[MOTORBIKE RETURN & CHECK-IN]</b>\n\n👤 Customer: <b>{customer_name}</b>\n🏍️ Motorcycle: <b>{bike_model}</b> ({plate_number})\n📅 Return Date: {return_date}\n💵 Late Fee: ${late_fee} | Damage Fee: ${damage_fee}\n✅ Deposit Returned: ${deposit_returned}\n👨‍💼 Received By: {staff_name}\n🕒 Time: {time}',
+    room_checkin: '🏨 <b>[GUEST ROOM CHECK-IN]</b>\n\n🚪 Room(s): <b>{room_name}</b>\n🛏️ Bed Type: <b>{bed_type}</b>\n👤 Guest: <b>{guest_name}</b>\n📞 Phone: {phone}\n📅 Stay: {check_in_date} to {check_out_date}\n💰 Total Room Rate: ${total_price}\n💳 Payment: {payment_method}\n👨‍💼 Receptionist: {staff_name}\n🕒 Time: {time}',
+    room_checkout: '🚪 <b>[GUEST ROOM CHECK-OUT]</b>\n\n🚪 Room(s): <b>{room_name}</b>\n👤 Guest: <b>{guest_name}</b>\n📞 Phone: {phone}\n📅 Stayed: {check_in_date} to {check_out_date}\n🧹 Status: <b>Housekeeping Required</b>\n👨‍💼 Handled By: {staff_name}\n🕒 Time: {time}',
+    booking: '🔔 <b>[NEW BOOKING ALERT]</b>\n\n🔖 Booking Ref: <code>{booking_ref}</code>\n🏷️ Type: <b>{type}</b>\n📌 Item / Room: <b>{item_name}</b>\n👤 Customer: <b>{customer_name}</b>\n📞 Phone: {phone}\n📅 Date: {start_date} to {end_date}\n💰 Estimated Amount: ${total_amount}\n🕒 Time: {time}',
+    revenue: '💰 <b>[PAYMENT RECEIVED / REVENUE REPORT]</b>\n\n🧾 Invoice: <b>#{invoice_id}</b>\n👤 Customer: <b>{customer_name}</b>\n💵 Amount Received: <b>${amount}</b>\n💳 Payment Method: <b>{payment_method}</b>\n🕒 Time: {time}',
+    maintenance: '🛠️ <b>[MAINTENANCE & REPAIR ALERT]</b>\n\n🏷️ Service Type: <b>{service_type}</b>\n📌 Target: <b>{target_name}</b>\n📝 Description: {description}\n💵 Cost: ${cost}\n👨‍🔧 Performed By: {technician}\n🕒 Time: {time}',
+    overdue: '⚠️ <b>[OVERDUE WARNING NOTICE]</b>\n\n📌 Topic: <b>{subject}</b>\n👤 Customer: <b>{customer_name}</b>\n📞 Phone: {phone}\n🏷️ Item / Room: <b>{item_name}</b>\n⏰ Overdue Duration: {overdue_duration}\n⚠️ Immediate follow-up recommended!\n🕒 Time: {time}',
+    dashboard: '📊 <b>[DAILY OPERATIONS SUMMARY]</b>\n\n🏨 Occupied Rooms: <b>{occupied_rooms}</b> | Vacant: <b>{vacant_rooms}</b>\n🛵 Active Rentals: <b>{active_rentals}</b> | Available Fleet: <b>{available_bikes}</b>\n💰 Revenue Today: <b>${today_revenue}</b>\n🔔 New Bookings: <b>{new_bookings}</b>\n🕒 <i>{time}</i>',
+    system: '📢 <b>[OFFICIAL STAFF ANNOUNCEMENT]</b>\n\n📌 <b>{title}</b>\n\n{message}\n\n🕒 <i>{time}</i>\n👤 <i>Broadcast by: {staff_name}</i>'
+  }
+};
+
 function formatCustomTemplate(template, vars = {}) {
   if (!template) return '';
   let result = template;
@@ -618,32 +646,24 @@ function formatCustomTemplate(template, vars = {}) {
   return result;
 }
 
-// 1. Check-Out Alert Dispatcher (Customizable)
+// 1. Motor Check-Out Alert Dispatcher (Customizable)
 async function sendCheckoutAlert(data = {}) {
   try {
     const { token, chatId, tgSettings } = await getTelegramCredentials();
     if (!token || !chatId) return { ok: false, reason: 'No Telegram credentials' };
     if (tgSettings.checkoutAlertEnabled === false) return { ok: true, skipped: true };
 
+    const lang = data.lang || tgSettings.alertLanguage || 'kh';
+    const defaultTemplate = DEFAULT_ALERT_TEMPLATES[lang]?.rental || DEFAULT_ALERT_TEMPLATES.kh.rental;
     const timeStr = new Date().toLocaleString('en-GB', { timeZone: 'Asia/Phnom_Penh' });
-    const defaultTemplate = '🛵 <b>[ការចេញដំណើរ / CHECK-OUT ALERT]</b>\n\n' +
-      '👤 អតិថិជន: <b>{customer_name}</b>\n' +
-      '📞 ទូរស័ព្ទ: {phone}\n' +
-      '🏍️ យានយន្ត/បន្ទប់: <b>{bike_model}</b> ({plate_number})\n' +
-      '📅 កាលបរិច្ឆេទ: {start_date} ដល់ {end_date}\n' +
-      '💰 តម្លៃសរុប: ${total_amount} | ប្រាក់កក់: ${deposit}\n' +
-      '💳 បង់ប្រាក់: {payment_method}\n' +
-      '👨‍💼 បុគ្គលិក: {staff_name}\n' +
-      '🕒 ម៉ោង: {time}';
 
     const tpl = tgSettings.checkoutAlertTemplate || tgSettings.rentalAlertTemplate || defaultTemplate;
     const msg = formatCustomTemplate(tpl, {
       customer_name: data.customer_name || data.guestName || data.guest_name || 'Customer',
       phone: data.phone || data.guestPhone || data.guest_phone || 'N/A',
       bike_model: data.bike_model || data.bikeName || data.item_name || 'Motorbike',
-      item_name: data.item_name || data.bikeName || data.roomName || 'Motorbike',
-      plate_number: data.plate_number || data.plateNumber || 'No Plate',
-      room_name: data.room_name || data.roomName || 'Room',
+      item_name: data.item_name || data.bikeName || 'Motorbike',
+      plate_number: data.plate_number || data.plateNumber || 'N/A',
       start_date: data.start_date || data.startDate || data.checkoutDate || '',
       end_date: data.end_date || data.endDate || data.returnDueDate || '',
       total_amount: data.total_amount || data.totalPrice || data.totalFee || 0,
@@ -662,35 +682,32 @@ async function sendCheckoutAlert(data = {}) {
   }
 }
 
-// 2. Check-In / Return Alert Dispatcher (Customizable)
+// 2. Motor Check-In / Return Alert Dispatcher (Customizable)
 async function sendCheckinAlert(data = {}) {
   try {
     const { token, chatId, tgSettings } = await getTelegramCredentials();
     if (!token || !chatId) return { ok: false, reason: 'No Telegram credentials' };
     if (tgSettings.checkinAlertEnabled === false) return { ok: true, skipped: true };
 
+    const lang = data.lang || tgSettings.alertLanguage || 'kh';
+    const defaultTemplate = DEFAULT_ALERT_TEMPLATES[lang]?.return || DEFAULT_ALERT_TEMPLATES.kh.return;
     const timeStr = new Date().toLocaleString('en-GB', { timeZone: 'Asia/Phnom_Penh' });
-    const defaultTemplate = '🏁 <b>[ការប្រគល់ត្រឡប់ / CHECK-IN & RETURN ALERT]</b>\n\n' +
-      '👤 អតិថិជន: <b>{customer_name}</b>\n' +
-      '🏍️ យានយន្ត/បន្ទប់: <b>{bike_model}</b> ({plate_number})\n' +
-      '📅 ថ្ងៃត្រឡប់: {return_date}\n' +
-      '💵 ថ្លៃយឺត: ${late_fee} | ថ្លៃខូចខាត: ${damage_fee}\n' +
-      '✅ ប្រាក់តម្កល់បានប្រគល់: ${deposit_returned}\n' +
-      '👨‍💼 បុគ្គលិកទទួល: {staff_name}\n' +
-      '🕒 ម៉ោង: {time}';
 
     const tpl = tgSettings.checkinAlertTemplate || tgSettings.returnAlertTemplate || defaultTemplate;
     const msg = formatCustomTemplate(tpl, {
       customer_name: data.customer_name || data.guestName || data.guest_name || 'Customer',
       phone: data.phone || data.guestPhone || data.guest_phone || 'N/A',
       bike_model: data.bike_model || data.bikeName || data.item_name || 'Motorbike',
-      item_name: data.item_name || data.bikeName || data.roomName || 'Motorbike',
-      plate_number: data.plate_number || data.plateNumber || 'No Plate',
-      room_name: data.room_name || data.roomName || 'Room',
-      return_date: data.return_date || data.returnDate || data.checkInDate || '',
-      late_fee: data.late_fee || data.lateFee || 0,
-      damage_fee: data.damage_fee || data.damageFee || 0,
-      deposit_returned: data.deposit_returned || data.depositReturned || data.deposit || 0,
+      item_name: data.item_name || data.bikeName || 'Motorbike',
+      plate_number: data.plate_number || data.plateNumber || 'N/A',
+      start_date: data.start_date || data.startDate || '',
+      end_date: data.end_date || data.endDate || '',
+      return_date: data.return_date || data.returnDate || '',
+      total_amount: data.total_amount != null ? data.total_amount : (data.totalPrice != null ? data.totalPrice : 0),
+      deposit: data.deposit != null ? data.deposit : 0,
+      late_fee: data.late_fee != null ? data.late_fee : (data.lateFee != null ? data.lateFee : 0),
+      damage_fee: data.damage_fee != null ? data.damage_fee : (data.damageFee != null ? data.damageFee : 0),
+      deposit_returned: data.deposit_returned != null ? data.deposit_returned : (data.depositReturned != null ? data.depositReturned : (data.deposit != null ? data.deposit : 0)),
       payment_method: data.payment_method || data.returnPaymentType || data.paymentType || 'Cash',
       staff_name: data.staff_name || data.staffName || data.returnStaff || 'Reception',
       condition: data.condition || data.postCondition || '',
@@ -705,23 +722,84 @@ async function sendCheckinAlert(data = {}) {
   }
 }
 
-// 3. Booking Alert Dispatcher (Customizable)
+// 3. Room Check-In Alert Dispatcher (Customizable)
+async function sendRoomCheckinAlert(data = {}) {
+  try {
+    const { token, chatId, tgSettings } = await getTelegramCredentials();
+    if (!token || !chatId) return { ok: false, reason: 'No Telegram credentials' };
+    if (tgSettings.roomCheckinAlertEnabled === false) return { ok: true, skipped: true };
+
+    const lang = data.lang || tgSettings.alertLanguage || 'kh';
+    const defaultTemplate = DEFAULT_ALERT_TEMPLATES[lang]?.room_checkin || DEFAULT_ALERT_TEMPLATES.kh.room_checkin;
+    const timeStr = new Date().toLocaleString('en-GB', { timeZone: 'Asia/Phnom_Penh' });
+
+    const tpl = tgSettings.roomCheckinAlertTemplate || defaultTemplate;
+    const msg = formatCustomTemplate(tpl, {
+      room_name: data.room_name || data.roomName || 'Room',
+      bed_type: data.bed_type || data.bedType || 'Standard',
+      floor: data.floor || '1',
+      guest_name: data.guest_name || data.guestName || data.customer_name || 'Guest',
+      customer_name: data.guest_name || data.guestName || data.customer_name || 'Guest',
+      phone: data.phone || data.guestPhone || 'N/A',
+      passportOrId: data.passportOrId || '',
+      check_in_date: data.check_in_date || data.checkInDate || data.startDate || '',
+      check_out_date: data.check_out_date || data.checkOutDate || data.endDate || 'Open',
+      total_price: data.total_price != null ? data.total_price : (data.totalPrice != null ? data.totalPrice : 0),
+      payment_method: data.payment_method || data.paymentMethod || 'Cash',
+      staff_name: data.staff_name || data.staffName || 'Reception',
+      notes: data.notes || '',
+      time: timeStr
+    });
+
+    return await sendTelegramMessage(msg);
+  } catch (err) {
+    console.error('Error in sendRoomCheckinAlert:', err);
+    return { ok: false, error: err.message };
+  }
+}
+
+// 4. Room Check-Out Alert Dispatcher (Customizable)
+async function sendRoomCheckoutAlert(data = {}) {
+  try {
+    const { token, chatId, tgSettings } = await getTelegramCredentials();
+    if (!token || !chatId) return { ok: false, reason: 'No Telegram credentials' };
+    if (tgSettings.roomCheckoutAlertEnabled === false) return { ok: true, skipped: true };
+
+    const lang = data.lang || tgSettings.alertLanguage || 'kh';
+    const defaultTemplate = DEFAULT_ALERT_TEMPLATES[lang]?.room_checkout || DEFAULT_ALERT_TEMPLATES.kh.room_checkout;
+    const timeStr = new Date().toLocaleString('en-GB', { timeZone: 'Asia/Phnom_Penh' });
+
+    const tpl = tgSettings.roomCheckoutAlertTemplate || defaultTemplate;
+    const msg = formatCustomTemplate(tpl, {
+      room_name: data.room_name || data.roomName || 'Room',
+      bed_type: data.bed_type || data.bedType || 'Standard',
+      guest_name: data.guest_name || data.guestName || data.customer_name || 'Guest',
+      customer_name: data.guest_name || data.guestName || data.customer_name || 'Guest',
+      phone: data.phone || data.guestPhone || 'N/A',
+      check_in_date: data.check_in_date || data.checkInDate || '',
+      check_out_date: data.check_out_date || data.checkOutDate || data.actualCheckOut || '',
+      staff_name: data.staff_name || data.staffName || 'Reception',
+      notes: data.notes || '',
+      time: timeStr
+    });
+
+    return await sendTelegramMessage(msg);
+  } catch (err) {
+    console.error('Error in sendRoomCheckoutAlert:', err);
+    return { ok: false, error: err.message };
+  }
+}
+
+// 5. Booking Alert Dispatcher (Customizable)
 async function sendBookingAlert(data = {}) {
   try {
     const { token, chatId, tgSettings } = await getTelegramCredentials();
     if (!token || !chatId) return { ok: false, reason: 'No Telegram credentials' };
     if (tgSettings.bookingAlertEnabled === false) return { ok: true, skipped: true };
 
+    const lang = data.lang || tgSettings.alertLanguage || 'kh';
+    const defaultTemplate = DEFAULT_ALERT_TEMPLATES[lang]?.booking || DEFAULT_ALERT_TEMPLATES.kh.booking;
     const timeStr = new Date().toLocaleString('en-GB', { timeZone: 'Asia/Phnom_Penh' });
-    const defaultTemplate = '🔔 <b>[ការកក់ថ្មី / NEW BOOKING ALERT]</b>\n\n' +
-      '🔖 លេខកក់: <code>{booking_ref}</code>\n' +
-      '🏷️ ប្រភេទ: <b>{type}</b>\n' +
-      '📌 ព័ត៌មាន: <b>{item_name}</b>\n' +
-      '👤 អតិថិជន: <b>{customer_name}</b>\n' +
-      '📞 ទូរស័ព្ទ: {phone}\n' +
-      '📅 កាលបរិច្ឆេទ: {start_date} ដល់ {end_date}\n' +
-      '💰 តម្លៃប៉ាន់ស្មាន: ${total_amount}\n' +
-      '🕒 ម៉ោង: {time}';
 
     const tpl = tgSettings.bookingAlertTemplate || defaultTemplate;
     const msg = formatCustomTemplate(tpl, {
@@ -745,28 +823,102 @@ async function sendBookingAlert(data = {}) {
   }
 }
 
-async function sendTelegramMessage(text) {
-  const { token, chatId } = await getTelegramCredentials();
-  if (!token) return { ok: false, reason: 'No Telegram bot token configured in Settings' };
-  if (!chatId) return { ok: false, reason: 'No Telegram chat ID configured in Settings' };
+// 6. Revenue Alert Dispatcher (Customizable)
+async function sendRevenueAlert(data = {}) {
   try {
-    let resp = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    const { token, chatId, tgSettings } = await getTelegramCredentials();
+    if (!token || !chatId) return { ok: false, reason: 'No Telegram credentials' };
+    if (tgSettings.revenueAlertEnabled === false) return { ok: true, skipped: true };
+
+    const lang = data.lang || tgSettings.alertLanguage || 'kh';
+    const defaultTemplate = DEFAULT_ALERT_TEMPLATES[lang]?.revenue || DEFAULT_ALERT_TEMPLATES.kh.revenue;
+    const timeStr = new Date().toLocaleString('en-GB', { timeZone: 'Asia/Phnom_Penh' });
+
+    const tpl = tgSettings.revenueAlertTemplate || defaultTemplate;
+    const msg = formatCustomTemplate(tpl, {
+      invoice_id: data.invoice_id || data.invoiceId || data.id || 'N/A',
+      customer_name: data.customer_name || data.guestName || data.name || 'Customer',
+      amount: data.amount || data.totalAmount || 0,
+      payment_method: data.payment_method || data.paymentMethod || 'Cash',
+      notes: data.notes || '',
+      time: timeStr
+    });
+
+    return await sendTelegramMessage(msg);
+  } catch (err) {
+    console.error('Error in sendRevenueAlert:', err);
+    return { ok: false, error: err.message };
+  }
+}
+
+async function sendTelegramMessage(text, customCreds = null) {
+  let token, chatId;
+  let isCustom = false;
+  if (customCreds && customCreds.token && customCreds.chatId) {
+    token = customCreds.token;
+    chatId = customCreds.chatId;
+    isCustom = true;
+  } else {
+    const creds = await getTelegramCredentials();
+    token = creds.token;
+    chatId = creds.chatId;
+  }
+
+  const envToken = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
+  const envChatId = (process.env.TELEGRAM_CHAT_ID || '').trim();
+
+  // If token or chatId are empty, fallback to .env directly
+  if (!token && envToken) token = envToken;
+  if (!chatId && envChatId) chatId = envChatId;
+
+  if (!token) return { ok: false, reason: 'No Telegram bot token configured in Settings or .env' };
+  if (!chatId) return { ok: false, reason: 'No Telegram chat ID configured in Settings or .env' };
+
+  const attemptSend = async (t, c) => {
+    let resp = await fetch(`https://api.telegram.org/bot${t}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' })
+      body: JSON.stringify({ chat_id: c, text, parse_mode: 'HTML' })
     });
-    let result = await resp.json();
-    // If HTML entity parsing fails, retry as plain text
-    if (!result.ok && result.description && result.description.includes('parse entities')) {
-      console.log('Telegram HTML entity parse failed, retrying plain text...');
+    let res = await resp.json();
+    if (!res.ok && res.description && res.description.includes('parse entities')) {
       const plainText = text.replace(/<[^>]*>/g, '');
-      resp = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      resp = await fetch(`https://api.telegram.org/bot${t}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text: plainText })
+        body: JSON.stringify({ chat_id: c, text: plainText })
       });
-      result = await resp.json();
+      res = await resp.json();
     }
+    return res;
+  };
+
+  try {
+    let result = await attemptSend(token, chatId);
+
+    // If failed with chat not found or unauthorized, and we didn't use .env, try .env credentials
+    if (!result.ok && !isCustom && envToken && envChatId && (token !== envToken || chatId !== envChatId)) {
+      console.warn(`[Telegram] Primary credentials (${token.slice(0, 10)}... / ${chatId}) failed with: ${result.description}. Retrying with .env credentials...`);
+      const fallbackResult = await attemptSend(envToken, envChatId);
+      if (fallbackResult.ok) {
+        console.log(`[Telegram] Fallback to .env credentials succeeded! Auto-syncing working credentials to database settings...`);
+        // Update database settings so future calls use working credentials
+        db.get("SELECT value FROM settings WHERE key = 'telegram_settings'", [], (err, row) => {
+          let parsed = {};
+          if (row && row.value) {
+            try { parsed = typeof row.value === 'string' ? JSON.parse(row.value) : row.value; } catch (e) {}
+          }
+          parsed.botToken = envToken;
+          parsed.chatId = envChatId;
+          const jsonVal = JSON.stringify(parsed);
+          db.run("INSERT INTO settings (key, value) VALUES ('telegram_settings', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [jsonVal]);
+          db.run("INSERT INTO settings (key, value) VALUES ('telegram_token', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [envToken]);
+          db.run("INSERT INTO settings (key, value) VALUES ('telegram_chat_id', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [envChatId]);
+        });
+        return fallbackResult;
+      }
+    }
+
     if (!result.ok) {
       console.error('Telegram API error:', result);
     }
@@ -1013,98 +1165,196 @@ app.get('/api/room-occupancy', authenticateToken, (req, res) => {
   });
 });
 app.post('/api/room-occupancy', authenticateToken, (req, res) => {
-  const { roomId, roomName, guestName, guestPhone, guestNationality, bedCount, checkInDate, checkOutDate, notes } = req.body;
+  const { roomId, roomIds, roomName, guestName, guestPhone, guestNationality, passportOrId, bedCount, checkInDate, checkOutDate, notes, totalPrice, paymentMethod } = req.body;
 
-  // Helper: do the actual insert once we have a resolved (or null) roomId
-  const doInsert = (resolvedRoomId) => {
+  // Multi-room check-in support: check if roomIds is provided as an array or comma-separated list
+  const targetRoomIds = Array.isArray(roomIds) && roomIds.length > 0
+    ? roomIds.map(id => parseInt(id, 10)).filter(id => !isNaN(id) && id > 0)
+    : (typeof roomIds === 'string' && roomIds.includes(',')
+        ? roomIds.split(',').map(s => parseInt(s.trim(), 10)).filter(id => !isNaN(id) && id > 0)
+        : (roomId && !isNaN(parseInt(roomId, 10)) ? [parseInt(roomId, 10)] : []));
+
+  // If we have multiple rooms or at least one numeric roomId in targetRoomIds
+  if (targetRoomIds.length > 0) {
+    const placeholders = targetRoomIds.map(() => '?').join(',');
+    db.all(`SELECT * FROM rooms WHERE id IN (${placeholders})`, targetRoomIds, (err, roomRows) => {
+      if (err) { res.status(500).json({ error: err.message }); return; }
+
+      const roomsFound = roomRows || [];
+      const insertedIds = [];
+      const roomNames = [];
+      let totalCalculatedPrice = 0;
+
+      const groupBookingRef = targetRoomIds.length > 1 ? `GRP-${Date.now().toString().slice(-6)}` : null;
+      const combinedNotes = groupBookingRef 
+        ? `${notes ? notes + ' | ' : ''}Group Booking Ref: ${groupBookingRef} (${targetRoomIds.length} Rooms)`
+        : (notes || '');
+
+      let completed = 0;
+      targetRoomIds.forEach(targetId => {
+        const roomObj = roomsFound.find(r => r.id === targetId);
+        const nameDisplay = roomObj ? (roomObj.name || `Room #${roomObj.id}`) : `Room #${targetId}`;
+        roomNames.push(nameDisplay);
+        const beds = roomObj?.bedCount || bedCount || 1;
+        const roomRate = Number(roomObj?.price || roomObj?.rate || 0);
+        totalCalculatedPrice += roomRate;
+
+        db.run(
+          `INSERT INTO room_occupancy (roomId, guestName, guestPhone, guestNationality, passportOrId, bedCount, checkInDate, checkOutDate, notes, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'checked_in')`,
+          [targetId, guestName, guestPhone || '', guestNationality || '', passportOrId || '', beds, checkInDate, checkOutDate, combinedNotes],
+          function(insertErr) {
+            if (!insertErr && this.lastID) {
+              insertedIds.push(this.lastID);
+              db.run("UPDATE rooms SET status='occupied' WHERE id=?", [targetId]);
+            }
+            completed++;
+            if (completed === targetRoomIds.length) {
+              io.emit('room_status_updated');
+              io.emit('room_occupancy_updated');
+
+              const combinedRoomDisplay = roomNames.length > 1
+                ? roomNames.map(n => `បន្ទប់ ${n}`).join(' & ')
+                : (roomNames[0] ? `បន្ទប់លេខ ${roomNames[0]}` : 'Room');
+
+              const combinedBedTypes = roomsFound.map(r => r.bedType || `${r.bedCount || 1} Bed`).filter(Boolean).join(', ') || `${bedCount || 1} Beds`;
+
+              sendRoomCheckinAlert({
+                room_name: combinedRoomDisplay,
+                bed_type: combinedBedTypes,
+                floor: roomsFound.map(r => r.floor || '1').join(', '),
+                guest_name: guestName,
+                phone: guestPhone || 'N/A',
+                passportOrId: passportOrId || '',
+                check_in_date: checkInDate,
+                check_out_date: checkOutDate || 'Open',
+                total_price: totalPrice != null ? totalPrice : totalCalculatedPrice,
+                payment_method: paymentMethod || 'Cash',
+                staff_name: req.user?.username || 'Reception',
+                notes: combinedNotes
+              }).catch(e => console.warn('TG room checkin alert error:', e));
+
+              res.json({
+                success: true,
+                id: insertedIds[0],
+                ids: insertedIds,
+                roomCount: insertedIds.length,
+                roomNames,
+                groupBookingRef
+              });
+            }
+          }
+        );
+      });
+    });
+    return;
+  }
+
+  // Fallback for custom roomName without numeric ID
+  const doSingleInsert = (resolvedRoomId, roomRow = null) => {
     db.run(
-      `INSERT INTO room_occupancy (roomId, guestName, guestPhone, guestNationality, bedCount, checkInDate, checkOutDate, notes, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'checked_in')`,
-      [resolvedRoomId || null, guestName, guestPhone || '', guestNationality || '', bedCount || 1, checkInDate, checkOutDate, notes || ''],
+      `INSERT INTO room_occupancy (roomId, guestName, guestPhone, guestNationality, passportOrId, bedCount, checkInDate, checkOutDate, notes, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'checked_in')`,
+      [resolvedRoomId || null, guestName, guestPhone || '', guestNationality || '', passportOrId || '', bedCount || 1, checkInDate, checkOutDate, notes || ''],
       function(err) {
         if (err) { res.status(500).json({ error: err.message }); return; }
-        // Update room status to occupied (only if we have a valid numeric roomId)
         if (resolvedRoomId) {
           db.run("UPDATE rooms SET status='occupied' WHERE id=?", [resolvedRoomId]);
         }
         io.emit('room_status_updated');
         io.emit('room_occupancy_updated');
 
-        // Automatic Telegram Alert for Room Check-in (Customizable)
-        sendCheckinAlert({
-          customer_name: guestName,
+        const roomDisplayName = roomName || (roomRow ? (roomRow.name ? `បន្ទប់លេខ ${roomRow.name}` : `Room #${roomRow.id}`) : (resolvedRoomId ? `Room #${resolvedRoomId}` : 'Room'));
+        const bedTypeDisplay = roomRow?.bedType || (bedCount > 1 ? `${bedCount} Beds` : '1 Bed');
+
+        sendRoomCheckinAlert({
+          room_name: roomDisplayName,
+          bed_type: bedTypeDisplay,
+          floor: roomRow?.floor || '1',
+          guest_name: guestName,
           phone: guestPhone || 'N/A',
-          item_name: roomName || (resolvedRoomId ? 'Room #' + resolvedRoomId : 'Room'),
-          room_name: roomName || (resolvedRoomId ? 'Room #' + resolvedRoomId : 'Room'),
-          bike_model: roomName || (resolvedRoomId ? 'Room #' + resolvedRoomId : 'Room'),
-          return_date: checkInDate,
-          start_date: checkInDate,
-          end_date: checkOutDate || 'Open',
+          passportOrId: passportOrId || '',
+          check_in_date: checkInDate,
+          check_out_date: checkOutDate || 'Open',
+          total_price: totalPrice || roomRow?.price || 0,
+          payment_method: paymentMethod || 'Cash',
           staff_name: req.user?.username || 'Reception',
           notes: notes || ''
-        }).catch(e => console.warn('TG checkin alert error:', e));
+        }).catch(e => console.warn('TG room checkin alert error:', e));
 
-        res.json({ id: this.lastID });
+        res.json({ id: this.lastID, ids: [this.lastID], roomCount: 1 });
       }
     );
   };
 
-  // If roomId is a valid integer, try to use it directly
-  const numericId = parseInt(roomId, 10);
-  if (numericId && !isNaN(numericId)) {
-    // Verify it actually exists in rooms table
-    db.get("SELECT id FROM rooms WHERE id = ?", [numericId], (err, row) => {
-      if (row) {
-        doInsert(numericId);
-      } else if (roomName) {
-        // roomId not found, try to look up by name
-        db.get("SELECT id FROM rooms WHERE name = ? OR name LIKE ?", [roomName, `%${roomName}%`], (e2, r2) => {
-          doInsert(r2 ? r2.id : null);
-        });
-      } else {
-        doInsert(null);
-      }
-    });
-  } else if (roomName) {
-    // No numeric roomId — look up room by name
-    db.get("SELECT id FROM rooms WHERE name = ? OR name LIKE ?", [roomName, `%${roomName}%`], (err, row) => {
-      doInsert(row ? row.id : null);
+  if (roomName) {
+    db.get("SELECT * FROM rooms WHERE name = ? OR name LIKE ?", [roomName, `%${roomName}%`], (err, row) => {
+      doSingleInsert(row ? row.id : null, row || null);
     });
   } else {
-    // No roomId, no roomName — insert with null roomId
-    doInsert(null);
+    doSingleInsert(null, null);
   }
 });
 app.patch('/api/room-occupancy/:id/checkout', authenticateToken, (req, res) => {
   const now = new Date().toISOString();
-  db.get("SELECT * FROM room_occupancy WHERE id=?", [req.params.id], (err, row) => {
-    if (err || !row) { res.status(404).json({ error: 'Not found' }); return; }
-    db.run("UPDATE room_occupancy SET status='checked_out', actualCheckOut=? WHERE id=?", [now, req.params.id], function(err2) {
+  const nextStatus = req.body?.nextRoomStatus || 'cleaning';
+  const checkoutRelated = Boolean(req.body?.checkoutRelated);
+  const relatedOccupancyIds = Array.isArray(req.body?.relatedOccupancyIds)
+    ? req.body.relatedOccupancyIds.map(Number).filter(Boolean)
+    : [];
+
+  const targetIds = checkoutRelated && relatedOccupancyIds.length > 0
+    ? Array.from(new Set([Number(req.params.id), ...relatedOccupancyIds]))
+    : [Number(req.params.id)];
+
+  const placeholders = targetIds.map(() => '?').join(',');
+
+  db.all(`SELECT ro.*, r.name as roomName, r.bedType, r.floor FROM room_occupancy ro LEFT JOIN rooms r ON ro.roomId = r.id WHERE ro.id IN (${placeholders})`, targetIds, (err, rows) => {
+    if (err || !rows || rows.length === 0) { res.status(404).json({ error: 'Occupancy record not found' }); return; }
+
+    const primaryRow = rows.find(r => String(r.id) === String(req.params.id)) || rows[0];
+    const roomIds = rows.map(r => r.roomId).filter(Boolean);
+    const roomNames = rows.map(r => r.roomName || String(r.roomId)).filter(Boolean);
+
+    db.run(`UPDATE room_occupancy SET status='checked_out', actualCheckOut=? WHERE id IN (${placeholders})`, [now, ...targetIds], function(err2) {
       if (err2) { res.status(500).json({ error: err2.message }); return; }
-      // Set room to cleaning after checkout
-      db.run("UPDATE rooms SET status='cleaning' WHERE id=?", [row.roomId]);
+
+      // Update rooms to next status (cleaning, vacant, or maintenance)
+      if (roomIds.length > 0) {
+        const roomPlaceholders = roomIds.map(() => '?').join(',');
+        db.run(`UPDATE rooms SET status=? WHERE id IN (${roomPlaceholders})`, [nextStatus, ...roomIds]);
+      }
+
       io.emit('room_status_updated');
       io.emit('room_occupancy_updated');
 
-      // Automatic Telegram Alert for Room Check-out (Customizable)
-      sendCheckoutAlert({
-        customer_name: row.guestName,
-        phone: row.guestPhone || 'N/A',
-        item_name: `Room #${row.roomId || 'N/A'}`,
-        room_name: `Room #${row.roomId || 'N/A'}`,
-        bike_model: `Room #${row.roomId || 'N/A'}`,
-        start_date: row.checkInDate,
-        end_date: now.split('T')[0],
-        staff_name: req.user?.username || 'Reception'
-      }).catch(e => console.warn('TG checkout alert error:', e));
+      const roomDisplayName = roomNames.length > 1
+        ? `បន្ទប់លេខ ${roomNames.join(', ')} (${roomNames.length} Rooms)`
+        : (primaryRow.roomName ? `បន្ទប់លេខ ${primaryRow.roomName}` : `Room #${primaryRow.roomId || 'N/A'}`);
 
-      res.json({ success: true });
+      // Dedicated Telegram Alert for Room Check-out
+      sendRoomCheckoutAlert({
+        room_name: roomDisplayName,
+        bed_type: primaryRow.bedType || 'Standard',
+        guest_name: primaryRow.guestName,
+        phone: primaryRow.guestPhone || 'N/A',
+        check_in_date: primaryRow.checkInDate,
+        check_out_date: now.split('T')[0],
+        staff_name: req.user?.username || 'Reception'
+      }).catch(e => console.warn('TG room checkout alert error:', e));
+
+      res.json({
+        success: true,
+        checkedOutCount: targetIds.length,
+        roomNames,
+        nextStatus
+      });
     });
   });
 });
 app.put('/api/room-occupancy/:id', authenticateToken, (req, res) => {
   const {
-    roomId, guestName, guestPhone, guestNationality, bedCount,
+    roomId, guestName, guestPhone, guestNationality, passportOrId, bedCount,
     checkInDate, checkOutDate, totalPrice, paymentMethod, status, notes
   } = req.body;
   db.run(
@@ -1113,6 +1363,7 @@ app.put('/api/room-occupancy/:id', authenticateToken, (req, res) => {
       guestName = COALESCE(?, guestName),
       guestPhone = COALESCE(?, guestPhone),
       guestNationality = COALESCE(?, guestNationality),
+      passportOrId = COALESCE(?, passportOrId),
       bedCount = COALESCE(?, bedCount),
       checkInDate = COALESCE(?, checkInDate),
       checkOutDate = COALESCE(?, checkOutDate),
@@ -1121,7 +1372,7 @@ app.put('/api/room-occupancy/:id', authenticateToken, (req, res) => {
       status = COALESCE(?, status),
       notes = COALESCE(?, notes)
      WHERE id = ?`,
-    [roomId || null, guestName, guestPhone, guestNationality, bedCount, checkInDate, checkOutDate, totalPrice, paymentMethod, status, notes, req.params.id],
+    [roomId || null, guestName, guestPhone, guestNationality, passportOrId, bedCount, checkInDate, checkOutDate, totalPrice, paymentMethod, status, notes, req.params.id],
     function(err) {
       if (err) { res.status(500).json({ error: err.message }); return; }
       if (roomId && status === 'checked_in') {
@@ -1285,19 +1536,28 @@ app.patch('/api/rentals/:id/return', authenticateToken, (req, res) => {
     const bikeName = rData.name || rData.bikeName || req.body.bikeName || 'Motorbike';
     const plateNumber = rData.plateNumber || req.body.plateNumber || '';
     const guestName = rData.guestName || req.body.guestName || req.body.customerName || 'Customer';
-    const staffName = req.body.staffName || req.body.returnStaff || 'Reception';
+    const staffName = req.body.staffName || req.body.returnStaff || req.user?.username || 'Reception';
+    const totalAmt = rData.totalPrice != null ? rData.totalPrice : (rData.total != null ? rData.total : (req.body.total_amount != null ? req.body.total_amount : (req.body.totalPrice != null ? req.body.totalPrice : 0)));
+    const depAmt = req.body.deposit != null ? req.body.deposit : (rData.deposit != null ? rData.deposit : 0);
+
     sendCheckinAlert({
       customer_name: guestName,
       bike_model: bikeName,
       item_name: bikeName,
       plate_number: plateNumber,
+      phone: rData.guestPhone || rData.phone || req.body.guestPhone || req.body.phone || 'N/A',
+      start_date: rData.startDate || req.body.startDate || '',
+      end_date: rData.endDate || req.body.endDate || '',
       return_date: returnDate || now.split('T')[0],
+      total_amount: totalAmt,
+      deposit: depAmt,
       late_fee: lateFee || 0,
       damage_fee: damageFee || 0,
-      deposit_returned: req.body.deposit != null ? req.body.deposit : (rData.deposit || 0),
-      payment_method: req.body.returnPaymentType || req.body.paymentType || 'Cash',
+      deposit_returned: depAmt,
+      payment_method: req.body.returnPaymentType || req.body.paymentType || rData.paymentType || 'Cash',
       staff_name: staffName,
-      condition: postCondition || ''
+      condition: postCondition || '',
+      notes: damageNotes || req.body.notes || ''
     }).catch(e => console.warn('TG return alert error:', e));
   };
 
@@ -1858,13 +2118,16 @@ app.delete('/api/expenses/:id', authenticateToken, (req, res) => {
 
 // ===================== TELEGRAM ALERT CENTER =====================
 app.post('/api/telegram/send-alert', authenticateToken, async (req, res) => {
-  const { type, category, subject, title, message, summary, details, stats } = req.body;
+  const { type, category, subject, title, message, summary, details, stats, lang: explicitLang } = req.body;
   try {
+    const { tgSettings } = await getTelegramCredentials();
+    const lang = explicitLang || tgSettings.alertLanguage || 'kh';
     const timeStr = new Date().toLocaleString('en-GB', { timeZone: 'Asia/Phnom_Penh' });
     let text = '';
 
     if (category) {
-      const headerTitle = title || subject || `${category} Status Report`;
+      const isKh = lang === 'kh';
+      const headerTitle = title || subject || (isKh ? `របាយការណ៍ស្ថានភាព ${category}` : `${category} Status Report`);
       let statsSection = '';
       if (stats && typeof stats === 'object') {
         statsSection = Object.entries(stats)
@@ -1872,35 +2135,74 @@ app.post('/api/telegram/send-alert', authenticateToken, async (req, res) => {
           .join('\n');
       }
 
-      text = `<b>[${escapeHtml(category).toUpperCase()} ALERT]</b>\n` +
+      const alertHeader = isKh ? `[ការជូនដំណឹង ${escapeHtml(category).toUpperCase()}]` : `[${escapeHtml(category).toUpperCase()} ALERT]`;
+      const sentByLabel = isKh ? 'ផ្ញើដោយ' : 'Sent by';
+
+      text = `<b>${alertHeader}</b>\n` +
              `📌 <b>${escapeHtml(headerTitle)}</b>\n\n` +
              `${summary ? escapeHtml(summary) + '\n\n' : ''}` +
              `${statsSection ? statsSection + '\n\n' : ''}` +
              `${details ? escapeHtml(details) + '\n\n' : ''}` +
              `🕒 <i>${timeStr}</i>\n` +
-             `👤 <i>Sent by: ${escapeHtml(req.user?.username || 'Admin')}</i>`;
-    } else if (type === 'custom') {
-      text = `<b>[ANNOUNCEMENT]</b>\n\n` +
-             `📌 <b>${escapeHtml(subject || 'Notice')}</b>\n\n` +
-             `${escapeHtml(message || '')}\n\n` +
-             `🕒 <i>${timeStr}</i>\n` +
-             `👤 <i>Sent by: ${escapeHtml(req.user?.username || 'Admin')}</i>`;
+             `👤 <i>${sentByLabel}: ${escapeHtml(req.user?.username || 'Admin')}</i>`;
+    } else if (type === 'custom' || type === 'system') {
+      const defaultTpl = DEFAULT_ALERT_TEMPLATES[lang]?.system || DEFAULT_ALERT_TEMPLATES.kh.system;
+      const tpl = tgSettings.systemAlertTemplate || defaultTpl;
+      text = formatCustomTemplate(tpl, {
+        title: subject || title || (lang === 'kh' ? 'សេចក្ដីជូនដំណឹងបុគ្គលិក' : 'Staff Announcement'),
+        message: message || summary || '',
+        staff_name: req.user?.username || 'Admin',
+        time: timeStr
+      });
     } else if (type === 'dashboard') {
-      text = `<b>[DASHBOARD SUMMARY]</b>\n\n` +
-             `${escapeHtml(message || summary || 'Daily operational check.')}\n\n` +
-             `🕒 <i>${timeStr}</i>`;
+      const defaultTpl = DEFAULT_ALERT_TEMPLATES[lang]?.dashboard || DEFAULT_ALERT_TEMPLATES.kh.dashboard;
+      const tpl = tgSettings.dashboardAlertTemplate || defaultTpl;
+      text = formatCustomTemplate(tpl, {
+        occupied_rooms: req.body.occupied_rooms || req.body.occupiedRooms || 'Active',
+        vacant_rooms: req.body.vacant_rooms || req.body.vacantRooms || 'Available',
+        active_rentals: req.body.active_rentals || req.body.activeRentals || 'Active',
+        available_bikes: req.body.available_bikes || req.body.availableBikes || 'Available',
+        today_revenue: req.body.today_revenue || req.body.todayRevenue || '0.00',
+        new_bookings: req.body.new_bookings || req.body.newBookings || '0',
+        time: timeStr
+      });
     } else if (type === 'motos' || type === 'fleet') {
-      text = `<b>[FLEET STATUS]</b>\n\n` +
-             `${escapeHtml(message || summary || 'All motorbikes inspected and updated.')}\n\n` +
-             `🕒 <i>${timeStr}</i>`;
+      const isKh = lang === 'kh';
+      text = isKh
+        ? `🛵 <b>[ស្ថានភាពម៉ូតូ / FLEET STATUS]</b>\n\n${escapeHtml(message || summary || 'ការត្រួតពិនិត្យម៉ូតូ និងស្ថានភាពជួលប្រចាំថ្ងៃត្រូវបានធ្វើបច្ចុប្បន្នភាព។')}\n\n🕒 <i>${timeStr}</i>`
+        : `🛵 <b>[MOTORCYCLE FLEET STATUS]</b>\n\n${escapeHtml(message || summary || 'Daily fleet inspection and rental statuses updated successfully.')}\n\n🕒 <i>${timeStr}</i>`;
     } else if (type === 'overdue') {
-      text = `<b>[OVERDUE RENTALS WARNING]</b>\n\n` +
-             `${escapeHtml(message || summary || 'Please inspect active rentals list for late returns.')}\n\n` +
-             `🕒 <i>${timeStr}</i>`;
-    } else if (type === 'income') {
-      text = `<b>[INCOME REPORT]</b>\n\n` +
-             `${escapeHtml(message || summary || 'Financial transactions recorded in system.')}\n\n` +
-             `🕒 <i>${timeStr}</i>`;
+      const defaultTpl = DEFAULT_ALERT_TEMPLATES[lang]?.overdue || DEFAULT_ALERT_TEMPLATES.kh.overdue;
+      const tpl = tgSettings.overdueAlertTemplate || defaultTpl;
+      text = formatCustomTemplate(tpl, {
+        subject: subject || (lang === 'kh' ? 'ការជួលហួសកាលកំណត់' : 'Overdue Rental Warning'),
+        customer_name: req.body.customer_name || req.body.customerName || 'Customer',
+        phone: req.body.phone || 'N/A',
+        item_name: req.body.item_name || req.body.itemName || 'Rental / Room',
+        overdue_duration: req.body.overdue_duration || req.body.duration || 'Exceeded scheduled return',
+        time: timeStr
+      });
+    } else if (type === 'income' || type === 'revenue') {
+      const defaultTpl = DEFAULT_ALERT_TEMPLATES[lang]?.revenue || DEFAULT_ALERT_TEMPLATES.kh.revenue;
+      const tpl = tgSettings.revenueAlertTemplate || defaultTpl;
+      text = formatCustomTemplate(tpl, {
+        invoice_id: req.body.invoice_id || req.body.invoiceId || 'N/A',
+        customer_name: req.body.customer_name || req.body.guestName || req.body.name || 'Customer',
+        amount: req.body.amount || req.body.totalAmount || '0.00',
+        payment_method: req.body.payment_method || req.body.paymentMethod || 'Cash',
+        time: timeStr
+      });
+    } else if (type === 'maintenance') {
+      const defaultTpl = DEFAULT_ALERT_TEMPLATES[lang]?.maintenance || DEFAULT_ALERT_TEMPLATES.kh.maintenance;
+      const tpl = tgSettings.maintenanceAlertTemplate || defaultTpl;
+      text = formatCustomTemplate(tpl, {
+        service_type: req.body.service_type || req.body.taskType || 'Inspection / Repair',
+        target_name: req.body.target_name || req.body.roomName || req.body.bikeName || 'Asset',
+        description: req.body.description || message || summary || 'Routine servicing',
+        cost: req.body.cost || '0.00',
+        technician: req.body.technician || req.body.assignedTo || 'Staff',
+        time: timeStr
+      });
     } else {
       text = `<b>[SYSTEM NOTIFICATION]</b>\n\n` +
              `📌 <b>${escapeHtml(subject || title || 'Alert')}</b>\n\n` +
@@ -1909,46 +2211,93 @@ app.post('/api/telegram/send-alert', authenticateToken, async (req, res) => {
     }
 
     const result = await sendTelegramMessage(text);
-    if (result.ok) res.json({ success: true, result });
-    else res.status(400).json({ success: false, error: result.reason || result.description });
+    if (result.ok) {
+      res.json({ success: true, result });
+    } else {
+      let errMsg = result.reason || result.description || 'Unknown error';
+      if (errMsg.includes('chat not found')) {
+        errMsg = `${errMsg} — (Please check if the bot is added to your Telegram Group/Channel and has permission to post, or check if the Chat ID is correct)`;
+      } else if (errMsg.includes('Unauthorized')) {
+        errMsg = `${errMsg} — (Invalid Telegram Bot Token. Please check your token with @BotFather)`;
+      }
+      res.status(400).json({ success: false, error: errMsg });
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 app.post('/api/telegram/test-template', authenticateToken, async (req, res) => {
-  const { type, template } = req.body;
+  const { type, template, botToken, chatId, lang } = req.body;
   try {
+    let customCreds = null;
+    if (botToken && chatId) {
+      customCreds = { token: botToken.trim(), chatId: chatId.trim() };
+    }
     const timeStr = new Date().toLocaleString('en-GB', { timeZone: 'Asia/Phnom_Penh' });
+    const isKh = (lang || 'kh') === 'kh';
+
     const sampleData = {
       booking_ref: 'BK-TEST-2026',
-      type: 'Motor Rental (ជួលម៉ូតូ)',
+      type: isKh ? 'ជួលម៉ូតូ (Motor Rental)' : 'Motor Rental',
       item_name: 'Honda Scoopy 2024',
-      customer_name: 'John Doe (Test)',
+      customer_name: isKh ? 'សុខ សុភា (John Doe)' : 'John Doe',
       phone: '+855 12 345 678',
       bike_model: 'Honda Scoopy 2024',
       plate_number: '1AB-2345',
-      room_name: 'Deluxe Room #101',
-      start_date: '2026-09-13',
-      end_date: '2026-09-16',
+      room_name: isKh ? 'បន្ទប់លេខ 101 (Deluxe)' : 'Room 101 (Deluxe)',
+      bed_type: isKh ? '1 គ្រែធំ (Queen Bed)' : '1 Queen Bed',
+      floor: '1',
+      guest_name: isKh ? 'សុខ សុភា (John Doe)' : 'John Doe',
+      check_in_date: '2026-09-20',
+      check_out_date: '2026-09-23',
+      total_price: '75.00',
+      start_date: '2026-09-20',
+      end_date: '2026-09-23',
       total_amount: '45.00',
       deposit: '50.00',
-      return_date: '2026-09-16',
+      return_date: '2026-09-23',
       late_fee: '0.00',
       damage_fee: '0.00',
       deposit_returned: '50.00',
       payment_method: 'ABA KHQR',
-      staff_name: req.user?.username || 'Admin',
-      notes: 'Test notification from Admin Panel',
-      invoice_id: 'INV-TEST-001',
-      amount: '45.00',
+      staff_name: req.user?.username || 'Reception',
+      notes: isKh ? 'សារសាកល្បងពីផ្ទាំងគ្រប់គ្រង Admin' : 'Test alert preview from Admin Panel',
+      invoice_id: 'INV-2026-088',
+      amount: '75.00',
+      service_type: isKh ? 'ជួសជុលម៉ាស៊ីនត្រជាក់' : 'Air Conditioner Servicing',
+      target_name: isKh ? 'បន្ទប់ 201' : 'Room 201',
+      description: isKh ? 'លាងសម្អាតតម្រង និងបញ្ចូលហ្គាស' : 'Clean filters and gas refill',
+      cost: '35.00',
+      technician: isKh ? 'លោក សុខា' : 'Mr. Sokha',
+      subject: isKh ? 'ការជួលម៉ូតូហួសកាលកំណត់' : 'Overdue Motor Rental',
+      overdue_duration: isKh ? 'យឺត ២ ម៉ោង' : '2 Hours Late',
+      occupied_rooms: '8',
+      vacant_rooms: '12',
+      active_rentals: '14',
+      available_bikes: '6',
+      today_revenue: '420.00',
+      new_bookings: '5',
+      title: isKh ? 'សេចក្ដីជូនដំណឹងបុគ្គលិក' : 'Staff Notice',
+      message: isKh ? 'សូមបុគ្គលិកទាំងអស់ត្រួតពិនិត្យបញ្ជីបន្ទប់ និងម៉ូតូសម្រាប់ថ្ងៃនេះ។' : 'Please ensure all room check-ins and motor fleet inspections are verified.',
       time: timeStr
     };
 
-    const text = formatCustomTemplate(template, sampleData);
-    const result = await sendTelegramMessage(text);
-    if (result.ok) res.json({ success: true, result });
-    else res.status(400).json({ success: false, error: result.reason || result.description });
+    const defaultTpl = (DEFAULT_ALERT_TEMPLATES[isKh ? 'kh' : 'en'] || DEFAULT_ALERT_TEMPLATES['kh'])?.[type] || DEFAULT_ALERT_TEMPLATES['kh']?.[type] || '';
+    const targetTemplate = (template && String(template).trim()) ? template : defaultTpl;
+    const text = formatCustomTemplate(targetTemplate, sampleData);
+    const result = await sendTelegramMessage(text, customCreds);
+    if (result.ok) {
+      res.json({ success: true, preview: text, result });
+    } else {
+      let errMsg = result.reason || result.description || 'Unknown error';
+      if (errMsg.includes('chat not found')) {
+        errMsg = `${errMsg} — (សូមពិនិត្យ៖ ប្រសិនបើជា Group/Channel សូម Add Bot ចូល Group ជាមុនសិន និងផ្ដល់សិទ្ធិ Send Messages/Admin ឬបើជា Chat ផ្ទាល់ខ្លួន សូមចូលទៅ Telegram Bot រួចចុច /start)`;
+      } else if (errMsg.includes('Unauthorized')) {
+        errMsg = `${errMsg} — (Telegram Bot Token មិនត្រឹមត្រូវ សូមពិនិត្យមើល Token ពី @BotFather ឡើងវិញ)`;
+      }
+      res.status(400).json({ success: false, preview: text, error: errMsg });
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2089,9 +2438,24 @@ app.post('/api/settings', authenticateToken, (req, res) => {
   });
 });
 app.post('/api/settings/test', authenticateToken, async (req, res) => {
-  const result = await sendTelegramMessage('✅ <b>Test from Siem Reap Angkor PMS!</b>\nYour Telegram bot notifications are properly configured.');
-  if (result.ok) res.json({ success: true });
-  else res.status(400).json({ success: false, error: result.reason || result.description });
+  const customToken = req.body?.botToken || req.body?.token;
+  const customChatId = req.body?.chatId;
+  let customCreds = null;
+  if (customToken && customChatId) {
+    customCreds = { token: customToken.trim(), chatId: customChatId.trim() };
+  }
+  const result = await sendTelegramMessage('✅ <b>Test from Siem Reap Angkor PMS!</b>\nYour Telegram bot notifications are properly configured.', customCreds);
+  if (result.ok) {
+    res.json({ success: true });
+  } else {
+    let errMsg = result.reason || result.description || 'Unknown error';
+    if (errMsg.includes('chat not found')) {
+      errMsg = `${errMsg} — (សូមពិនិត្យ៖ ប្រសិនបើជា Group/Channel សូម Add Bot ចូល Group ជាមុនសិន និងផ្ដល់សិទ្ធិ Send Messages/Admin ឬបើជា Chat ផ្ទាល់ខ្លួន សូមចូលទៅ Telegram Bot រួចចុច /start)`;
+    } else if (errMsg.includes('Unauthorized')) {
+      errMsg = `${errMsg} — (Telegram Bot Token មិនត្រឹមត្រូវ សូមពិនិត្យមើល Token ពី @BotFather ឡើងវិញ)`;
+    }
+    res.status(400).json({ success: false, error: errMsg });
+  }
 });
 
 // Global error handler middleware so Vercel returns JSON instead of crashing

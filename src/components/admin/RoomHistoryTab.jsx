@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import PaginationControls from '../common/PaginationControls';
 import { BookingService } from '../../services/DatabaseService';
 import { useModal } from '../common/ModalProvider';
+import RoomInvoiceModal from './RoomInvoiceModal';
 
 export default function RoomHistoryTab({
   occupancy = [],
@@ -17,7 +18,8 @@ export default function RoomHistoryTab({
   btnPrimary = 'px-4 py-2 bg-brand-500 text-white text-sm font-bold rounded-lg hover:bg-brand-600 transition-colors shadow-sm',
   btnSecondary = 'px-4 py-2 bg-white border border-stone-200 text-stone-700 text-sm font-bold rounded-lg hover:bg-stone-50 transition-colors',
   btnDanger = 'px-4 py-2 bg-red-50 border border-red-100 text-red-600 text-sm font-bold rounded-lg hover:bg-red-100 transition-colors',
-  currency = 'USD'
+  currency = 'USD',
+  settings = {}
 }) {
   const { showModal, showConfirm } = useModal();
   const [search, setSearch] = useState('');
@@ -29,6 +31,7 @@ export default function RoomHistoryTab({
   const [pageSize, setPageSize] = useState(10);
   const [editingRecord, setEditingRecord] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [printRecord, setPrintRecord] = useState(null);
 
   // ── Merge occupancy records + checked-in bookings (as fallback) ─────────────
   const allHistory = useMemo(() => {
@@ -484,6 +487,14 @@ export default function RoomHistoryTab({
                       )}
                       <button
                         type="button"
+                        onClick={() => setPrintRecord(o)}
+                        className="px-2 py-1 bg-brand-50 text-brand-700 hover:bg-brand-100 border border-brand-200 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                        title="Print Official Folio / Receipt (A4 or POS)"
+                      >
+                        <i className="fa-solid fa-print text-[10px]"></i> Print
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => handleStartEdit(o)}
                         className="w-7 h-7 flex items-center justify-center text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors cursor-pointer"
                         title="Edit Record"
@@ -661,6 +672,19 @@ export default function RoomHistoryTab({
             </form>
           </div>
         </div>
+      )}
+
+      {/* Printable Invoice Modal (A4 & POS) */}
+      {printRecord && (
+        <RoomInvoiceModal
+          isOpen={!!printRecord}
+          onClose={() => setPrintRecord(null)}
+          occupancy={printRecord}
+          relatedOccupancies={[]}
+          rooms={rooms}
+          settings={settings}
+          currency={typeof currency === 'function' ? currency : (v) => `$${Number(v || 0).toFixed(2)}`}
+        />
       )}
     </div>
   );

@@ -38,6 +38,7 @@ import RoomsTab from './admin/RoomsTab';
 import RoomBookingsTab from './admin/RoomBookingsTab';
 import SettingsTab from './admin/SettingsTab';
 import ReportsTab from './admin/ReportsTab';
+import RoomInvoiceModal from './admin/RoomInvoiceModal';
 import { normalizeRental, normalizeBooking, normalizeRoom, normalizeMoto, normalizeModel, normalizeBedCategory, asArray, toDateStr } from '../utils/dataNormalizer';
 import { fileToBase64 } from '../utils/imageUtils';
 import PaginationControls from './common/PaginationControls';
@@ -157,7 +158,7 @@ export default function Admin() {
     security_settings: { autoBackupEnabled: true, backupFrequency: 'daily', requireStrongPasswords: true, sessionTimeoutMinutes: 120 },
     shop_settings: { shopName: 'Motorental Siemreab Angkor', logo: '/assets/logo.png', rentalHoursPerDay: 12, operatingHoursOpen: '06:00 AM', operatingHoursClose: '10:00 PM', depositDocTypes: "National ID, Passport, Driver's License, Birth Certificate, None" },
     theme_settings: { presetName: 'Angkor Terracotta', primaryColor: '#c0622b' },
-    telegram_settings: { botToken: '', chatId: '', checkoutAlertEnabled: true, checkinAlertEnabled: true, bookingAlertEnabled: true, rentalAlertTemplate: '', checkoutAlertTemplate: '', returnAlertTemplate: '', checkinAlertTemplate: '', bookingAlertTemplate: '', revenueAlertTemplate: '' }
+    telegram_settings: { botToken: '', chatId: '', checkoutAlertEnabled: true, checkinAlertEnabled: true, roomCheckinAlertEnabled: true, roomCheckoutAlertEnabled: true, bookingAlertEnabled: true, rentalAlertTemplate: '', checkoutAlertTemplate: '', returnAlertTemplate: '', checkinAlertTemplate: '', roomCheckinAlertTemplate: '', roomCheckoutAlertTemplate: '', bookingAlertTemplate: '', revenueAlertTemplate: '' }
   });
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [testResult, setTestResult] = useState(null);
@@ -778,6 +779,7 @@ export default function Admin() {
                 rooms={rooms}
                 bedCategories={bedCategories}
                 occupancy={occupancy}
+                guests={guests}
                 auth={auth}
                 fetchAll={fetchAll}
                 fetchDash={fetchDash}
@@ -792,6 +794,7 @@ export default function Admin() {
                 currency={currency}
                 sendCategoryTelegramAlert={sendCategoryTelegramAlert}
                 tgSending={tgSending}
+                settings={settings}
               />
             )
           )}
@@ -920,7 +923,7 @@ export default function Admin() {
             loadingData ? (
               <AdminTableSkeleton rows={7} cols={5} />
             ) : (
-              <BillingTab invoices={invoices} occupancy={occupancy} rentals={rentals} auth={auth} fetchAll={fetchAll} inputCls={inputCls} labelCls={labelCls} cardCls={cardCls} btnPrimary={btnPrimary} btnSecondary={btnSecondary} btnDanger={btnDanger} statusBadge={statusBadge} currency={currency} />
+              <BillingTab invoices={invoices} occupancy={occupancy} rentals={rentals} auth={auth} fetchAll={fetchAll} inputCls={inputCls} labelCls={labelCls} cardCls={cardCls} btnPrimary={btnPrimary} btnSecondary={btnSecondary} btnDanger={btnDanger} statusBadge={statusBadge} currency={currency} settings={settings} />
             )
           )}
 
@@ -1393,6 +1396,7 @@ export default function Admin() {
               btnDanger={btnDanger}
               statusBadge={statusBadge}
               currency={currency}
+              settings={settings}
             />
           )}
 
@@ -1517,6 +1521,7 @@ export default function Admin() {
               btnSecondary={btnSecondary}
               btnDanger={btnDanger}
               currency={currency}
+              settings={settings}
             />
           )}
 
@@ -1767,8 +1772,9 @@ function RentalsTab({ bikes, rentals, occupancy, auth, fetchAll, inputCls, label
   );
 }
 
-function BillingTab({ invoices, occupancy, rentals, auth, fetchAll, inputCls, labelCls, cardCls, btnPrimary, btnSecondary, btnDanger, statusBadge, currency }) {
+function BillingTab({ invoices, occupancy, rentals, auth, fetchAll, inputCls, labelCls, cardCls, btnPrimary, btnSecondary, btnDanger, statusBadge, currency, settings = {} }) {
   const [form, setForm] = useState({ guestName:'', guestPhone:'', roomOccupancyId:'', rentalId:'', roomCharge:0, bikeCharge:0, lateFee:0, damageFee:0, extras:0, extrasNote:'', discount:0, paymentMethod:'cash', notes:'' });
+  const [printInvoice, setPrintInvoice] = useState(null);
   const total = [form.roomCharge,form.bikeCharge,form.lateFee,form.damageFee,form.extras].reduce((s,v)=>s+(parseFloat(v)||0),0) - (parseFloat(form.discount)||0);
 
   const handleCreate = async (e) => {
@@ -1863,8 +1869,44 @@ function BillingTab({ invoices, occupancy, rentals, auth, fetchAll, inputCls, la
                       <td className="px-3 py-3 font-black text-stone-900">{currency(inv.totalAmount)}</td>
                       <td className="px-3 py-3 text-xs uppercase font-bold">{inv.paymentMethod}</td>
                       <td className="px-3 py-3"><span className={`text-xs font-bold px-2 py-0.5 rounded-full ${statusBadge[inv.paymentStatus]}`}>{inv.paymentStatus}</span></td>
-                      <td className="px-3 py-3">
-                        {inv.paymentStatus==='unpaid'&&<button onClick={()=>handlePay(inv.id)} className="text-xs font-bold px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-100 whitespace-nowrap">Mark Paid</button>}
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const items = [];
+                              if (Number(inv.roomCharge) > 0) {
+                                items.push({ description: 'Room Accommodation Charge', subtitle: 'Stay fee', rate: Number(inv.roomCharge), total: Number(inv.roomCharge), qty: 1 });
+                              }
+                              if (Number(inv.bikeCharge) > 0) {
+                                items.push({ description: 'Motorbike / Bicycle Rental', subtitle: 'Daily vehicle rate', rate: Number(inv.bikeCharge), total: Number(inv.bikeCharge), qty: 1 });
+                              }
+                              if (Number(inv.lateFee) > 0) {
+                                items.push({ description: 'Late Return Overdue Fee', subtitle: 'Penalty charge', rate: Number(inv.lateFee), total: Number(inv.lateFee), qty: 1 });
+                              }
+                              if (Number(inv.damageFee) > 0) {
+                                items.push({ description: 'Damage / Repair Fee', subtitle: 'Service maintenance', rate: Number(inv.damageFee), total: Number(inv.damageFee), qty: 1 });
+                              }
+                              if (Number(inv.extras) > 0) {
+                                items.push({ description: inv.extrasNote || 'Additional Hotel Services', subtitle: 'Guest services', rate: Number(inv.extras), total: Number(inv.extras), qty: 1 });
+                              }
+                              if (items.length === 0) {
+                                items.push({ description: 'Official Hotel Folio & Services', subtitle: 'Guest invoice', rate: Number(inv.totalAmount || 0), total: Number(inv.totalAmount || 0), qty: 1 });
+                              }
+                              setPrintInvoice({
+                                ...inv,
+                                customItems: items,
+                                discount: inv.discount
+                              });
+                            }}
+                            className="text-xs font-bold px-2.5 py-1 bg-brand-50 text-brand-700 border border-brand-200 rounded-lg hover:bg-brand-100 transition flex items-center gap-1 cursor-pointer"
+                            title="Print Official Folio / Invoice"
+                          >
+                            <i className="fa-solid fa-print text-xs"></i>
+                            <span>Print</span>
+                          </button>
+                          {inv.paymentStatus==='unpaid'&&<button onClick={()=>handlePay(inv.id)} className="text-xs font-bold px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-100 whitespace-nowrap cursor-pointer">Mark Paid</button>}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -1875,6 +1917,19 @@ function BillingTab({ invoices, occupancy, rentals, auth, fetchAll, inputCls, la
           </div>
         </div>
       </div>
+
+      {/* Official Printable Invoice Modal */}
+      {printInvoice && (
+        <RoomInvoiceModal
+          isOpen={!!printInvoice}
+          onClose={() => setPrintInvoice(null)}
+          occupancy={printInvoice}
+          relatedOccupancies={[]}
+          rooms={[]}
+          settings={settings}
+          currency={currency}
+        />
+      )}
     </div>
   );
 }

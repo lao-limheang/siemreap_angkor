@@ -19,6 +19,33 @@ const COLOR_PRESETS = [
   { name: 'Slate Dark',        hex: '#334155', label: 'Slate (ប្រផេះចាស់)' },
 ];
 
+export const ALERT_PRESETS = {
+  kh: {
+    rental: '🛵 <b>[ការចេញដំណើរម៉ូតូ / MOTOR CHECK-OUT]</b>\n\n👤 អតិថិជន: <b>{customer_name}</b>\n📞 ទូរស័ព្ទ: {phone}\n🏍️ ម៉ាកម៉ូតូ: <b>{bike_model}</b> ({plate_number})\n📅 កាលបរិច្ឆេទ: {start_date} ដល់ {end_date}\n💰 តម្លៃសរុប: ${total_amount} | ប្រាក់កក់: ${deposit}\n💳 បង់ប្រាក់: {payment_method}\n👨‍💼 បុគ្គលិក: {staff_name}\n🕒 ម៉ោង: {time}',
+    return: '🏁 <b>[ការប្រគល់ម៉ូតូត្រឡប់ / MOTOR RETURN & CHECK-IN]</b>\n\n👤 អតិថិជន: <b>{customer_name}</b>\n🏍️ ម៉ាកម៉ូតូ: <b>{bike_model}</b> ({plate_number})\n📅 ថ្ងៃត្រឡប់: {return_date}\n💵 ថ្លៃយឺត: ${late_fee} | ថ្លៃខូចខាត: ${damage_fee}\n✅ ប្រាក់តម្កល់បានប្រគល់: ${deposit_returned}\n👨‍💼 បុគ្គលិកទទួល: {staff_name}\n🕒 ម៉ោង: {time}',
+    room_checkin: '🏨 <b>[ភ្ញៀវចូលស្នាក់នៅ / ROOM CHECK-IN]</b>\n\n🚪 បន្ទប់: <b>{room_name}</b>\n🛏️ ប្រភេទគ្រែ: <b>{bed_type}</b>\n👤 ភ្ញៀវ: <b>{guest_name}</b>\n📞 ទូរស័ព្ទ: {phone}\n📅 ស្នាក់នៅ: {check_in_date} ដល់ {check_out_date}\n💰 តម្លៃបន្ទប់: ${total_price}\n💳 បង់ប្រាក់: {payment_method}\n👨‍💼 បុគ្គលិកទទួល: {staff_name}\n🕒 ម៉ោង: {time}',
+    room_checkout: '🚪 <b>[ភ្ញៀវចេញពីបន្ទប់ / ROOM CHECK-OUT]</b>\n\n🚪 បន្ទប់: <b>{room_name}</b>\n👤 ភ្ញៀវ: <b>{guest_name}</b>\n📞 ទូរស័ព្ទ: {phone}\n📅 កាលបរិច្ឆេទ: {check_in_date} ដល់ {check_out_date}\n🧹 ស្ថានភាព: <b>ត្រូវការសម្អាត (Housekeeping Required)</b>\n👨‍💼 បុគ្គលិក: {staff_name}\n🕒 ម៉ោង: {time}',
+    booking: '🔔 <b>[ការកក់ថ្មី / NEW BOOKING ALERT]</b>\n\n🔖 លេខកក់: <code>{booking_ref}</code>\n🏷️ ប្រភេទ: <b>{type}</b>\n📌 ព័ត៌មាន: <b>{item_name}</b>\n👤 អតិថិជន: <b>{customer_name}</b>\n📞 ទូរស័ព្ទ: {phone}\n📅 កាលបរិច្ឆេទ: {start_date} ដល់ {end_date}\n💰 តម្លៃប៉ាន់ស្មាន: ${total_amount}\n🕒 ម៉ោង: {time}',
+    revenue: '💰 <b>[ចំណូលទទួលបាន / PAYMENT RECEIVED]</b>\n\n🧾 វិក្កយបត្រ: <b>#{invoice_id}</b>\n👤 អតិថិជន: <b>{customer_name}</b>\n💵 ចំនួនទឹកប្រាក់: <b>${amount}</b>\n💳 វិធីទូទាត់: <b>{payment_method}</b>\n🕒 ម៉ោង: {time}',
+    maintenance: '🛠️ <b>[ការថែទាំ & ជួសជុល / MAINTENANCE ALERT]</b>\n\n🏷️ ប្រភេទ: <b>{service_type}</b>\n📌 គោលដៅ: <b>{target_name}</b>\n📝 ការពិពណ៌នា: {description}\n💵 ការចំណាយ: ${cost}\n👨‍🔧 ជាងទទួលបន្ទុក: {technician}\n🕒 ម៉ោង: {time}',
+    overdue: '⚠️ <b>[ការជូនដំណឹងហួសកាលកំណត់ / OVERDUE WARNING]</b>\n\n📌 ប្រធានបទ: <b>{subject}</b>\n👤 អតិថិជន: <b>{customer_name}</b>\n📞 ទូរស័ព្ទ: {phone}\n🏷️ ព័ត៌មាន: <b>{item_name}</b>\n⏰ ហួសកំណត់: {overdue_duration}\n⚠️ សូមទំនាក់ទំនងទៅកាន់អតិថិជនជាបន្ទាន់\n🕒 ម៉ោង: {time}',
+    dashboard: '📊 <b>[សេចក្តីសង្ខេបប្រតិបត្តិការ / DAILY OPERATIONS SUMMARY]</b>\n\n🏨 បន្ទប់កំពុងស្នាក់នៅ: <b>{occupied_rooms}</b> / ទំនេរ: <b>{vacant_rooms}</b>\n🛵 ម៉ូតូកំពុងជួល: <b>{active_rentals}</b> / ក្នុងស្តុក: <b>{available_bikes}</b>\n💰 ចំណូលថ្ងៃនេះ: <b>${today_revenue}</b>\n🔔 ការកក់ថ្មី: <b>{new_bookings}</b>\n🕒 <i>{time}</i>',
+    system: '📢 <b>[សេចក្ដីជូនដំណឹងបុគ្គលិក / STAFF ANNOUNCEMENT]</b>\n\n📌 <b>{title}</b>\n\n{message}\n\n🕒 <i>{time}</i>\n👤 <i>ផ្ញើដោយ: {staff_name}</i>'
+  },
+  en: {
+    rental: '🛵 <b>[MOTORBIKE RENTAL CHECK-OUT]</b>\n\n👤 Customer: <b>{customer_name}</b>\n📞 Phone: {phone}\n🏍️ Motorcycle: <b>{bike_model}</b> ({plate_number})\n📅 Period: {start_date} to {end_date}\n💰 Total: ${total_amount} | Deposit: ${deposit}\n💳 Payment: {payment_method}\n👨‍💼 Staff: {staff_name}\n🕒 Time: {time}',
+    return: '🏁 <b>[MOTORBIKE RETURN & CHECK-IN]</b>\n\n👤 Customer: <b>{customer_name}</b>\n🏍️ Motorcycle: <b>{bike_model}</b> ({plate_number})\n📅 Return Date: {return_date}\n💵 Late Fee: ${late_fee} | Damage Fee: ${damage_fee}\n✅ Deposit Returned: ${deposit_returned}\n👨‍💼 Received By: {staff_name}\n🕒 Time: {time}',
+    room_checkin: '🏨 <b>[GUEST ROOM CHECK-IN]</b>\n\n🚪 Room(s): <b>{room_name}</b>\n🛏️ Bed Type: <b>{bed_type}</b>\n👤 Guest: <b>{guest_name}</b>\n📞 Phone: {phone}\n📅 Stay: {check_in_date} to {check_out_date}\n💰 Total Room Rate: ${total_price}\n💳 Payment: {payment_method}\n👨‍💼 Receptionist: {staff_name}\n🕒 Time: {time}',
+    room_checkout: '🚪 <b>[GUEST ROOM CHECK-OUT]</b>\n\n🚪 Room(s): <b>{room_name}</b>\n👤 Guest: <b>{guest_name}</b>\n📞 Phone: {phone}\n📅 Stayed: {check_in_date} to {check_out_date}\n🧹 Status: <b>Housekeeping Required</b>\n👨‍💼 Handled By: {staff_name}\n🕒 Time: {time}',
+    booking: '🔔 <b>[NEW BOOKING ALERT]</b>\n\n🔖 Booking Ref: <code>{booking_ref}</code>\n🏷️ Type: <b>{type}</b>\n📌 Item / Room: <b>{item_name}</b>\n👤 Customer: <b>{customer_name}</b>\n📞 Phone: {phone}\n📅 Date: {start_date} to {end_date}\n💰 Estimated Amount: ${total_amount}\n🕒 Time: {time}',
+    revenue: '💰 <b>[PAYMENT RECEIVED / REVENUE REPORT]</b>\n\n🧾 Invoice: <b>#{invoice_id}</b>\n👤 Customer: <b>{customer_name}</b>\n💵 Amount Received: <b>${amount}</b>\n💳 Payment Method: <b>{payment_method}</b>\n🕒 Time: {time}',
+    maintenance: '🛠️ <b>[MAINTENANCE & REPAIR ALERT]</b>\n\n🏷️ Service Type: <b>{service_type}</b>\n📌 Target: <b>{target_name}</b>\n📝 Description: {description}\n💵 Cost: ${cost}\n👨‍🔧 Performed By: {technician}\n🕒 Time: {time}',
+    overdue: '⚠️ <b>[OVERDUE WARNING NOTICE]</b>\n\n📌 Topic: <b>{subject}</b>\n👤 Customer: <b>{customer_name}</b>\n📞 Phone: {phone}\n🏷️ Item / Room: <b>{item_name}</b>\n⏰ Overdue Duration: {overdue_duration}\n⚠️ Immediate follow-up recommended!\n🕒 Time: {time}',
+    dashboard: '📊 <b>[DAILY OPERATIONS SUMMARY]</b>\n\n🏨 Occupied Rooms: <b>{occupied_rooms}</b> | Vacant: <b>{vacant_rooms}</b>\n🛵 Active Rentals: <b>{active_rentals}</b> | Available Fleet: <b>{available_bikes}</b>\n💰 Revenue Today: <b>${today_revenue}</b>\n🔔 New Bookings: <b>{new_bookings}</b>\n🕒 <i>{time}</i>',
+    system: '📢 <b>[OFFICIAL STAFF ANNOUNCEMENT]</b>\n\n📌 <b>{title}</b>\n\n{message}\n\n🕒 <i>{time}</i>\n👤 <i>Broadcast by: {staff_name}</i>'
+  }
+};
+
 export default function SettingsTab({
   settings = {},
   setSettings,
@@ -106,10 +133,42 @@ export default function SettingsTab({
   // Telegram settings
   const currentTgToken = tgSet.botToken || settings.telegram_token || '';
   const currentTgChatId = tgSet.chatId || settings.telegram_chat_id || '';
-  const currentRentalTemplate = tgSet.rentalAlertTemplate || tgSet.checkoutAlertTemplate || '🛵 <b>[ការចេញដំណើរ / CHECK-OUT ALERT]</b>\n\n👤 អតិថិជន: <b>{customer_name}</b>\n📞 ទូរស័ព្ទ: {phone}\n🏍️ យានយន្ត/បន្ទប់: <b>{bike_model}</b> ({plate_number})\n📅 កាលបរិច្ឆេទ: {start_date} ដល់ {end_date}\n💰 តម្លៃសរុប: ${total_amount} | ប្រាក់កក់: ${deposit}\n💳 បង់ប្រាក់: {payment_method}\n👨‍💼 បុគ្គលិក: {staff_name}\n🕒 ម៉ោង: {time}';
-  const currentReturnTemplate = tgSet.returnAlertTemplate || tgSet.checkinAlertTemplate || '🏁 <b>[ការប្រគល់ត្រឡប់ / CHECK-IN & RETURN ALERT]</b>\n\n👤 អតិថិជន: <b>{customer_name}</b>\n🏍️ យានយន្ត/បន្ទប់: <b>{bike_model}</b> ({plate_number})\n📅 ថ្ងៃត្រឡប់: {return_date}\n💵 ថ្លៃយឺត: ${late_fee} | ថ្លៃខូចខាត: ${damage_fee}\n✅ ប្រាក់តម្កល់បានប្រគល់: ${deposit_returned}\n👨‍💼 បុគ្គលិកទទួល: {staff_name}\n🕒 ម៉ោង: {time}';
-  const currentBookingTemplate = tgSet.bookingAlertTemplate || '🔔 <b>[ការកក់ថ្មី / NEW BOOKING ALERT]</b>\n\n🔖 លេខកក់: <code>{booking_ref}</code>\n🏷️ ប្រភេទ: <b>{type}</b>\n📌 ព័ត៌មាន: <b>{item_name}</b>\n👤 អតិថិជន: <b>{customer_name}</b>\n📞 ទូរស័ព្ទ: {phone}\n📅 កាលបរិច្ឆេទ: {start_date} ដល់ {end_date}\n💰 តម្លៃប៉ាន់ស្មាន: ${total_amount}\n🕒 ម៉ោង: {time}';
-  const currentRevenueTemplate = tgSet.revenueAlertTemplate || '💰 <b>[ចំណូលទទួលបាន / Payment Received]</b>\n\nវិក្កយបត្រ: #{invoice_id}\nអតិថិជន: {customer_name}\nចំនួនទឹកប្រាក់: ${amount}\nវិធីទូទាត់: {payment_method}\n🕒 ម៉ោង: {time}';
+  const currentRentalTemplate = tgSet.rentalAlertTemplate || tgSet.checkoutAlertTemplate || ALERT_PRESETS.kh.rental;
+  const currentReturnTemplate = tgSet.returnAlertTemplate || tgSet.checkinAlertTemplate || ALERT_PRESETS.kh.return;
+  const currentRoomCheckinTemplate = tgSet.roomCheckinAlertTemplate || ALERT_PRESETS.kh.room_checkin;
+  const currentRoomCheckoutTemplate = tgSet.roomCheckoutAlertTemplate || ALERT_PRESETS.kh.room_checkout;
+  const currentBookingTemplate = tgSet.bookingAlertTemplate || ALERT_PRESETS.kh.booking;
+  const currentRevenueTemplate = tgSet.revenueAlertTemplate || ALERT_PRESETS.kh.revenue;
+  const currentMaintenanceTemplate = tgSet.maintenanceAlertTemplate || ALERT_PRESETS.kh.maintenance;
+  const currentOverdueTemplate = tgSet.overdueAlertTemplate || ALERT_PRESETS.kh.overdue;
+  const currentDashboardTemplate = tgSet.dashboardAlertTemplate || ALERT_PRESETS.kh.dashboard;
+  const currentSystemTemplate = tgSet.systemAlertTemplate || ALERT_PRESETS.kh.system;
+  const currentAlertLanguage = tgSet.alertLanguage || 'kh';
+
+  // Invoice & POS receipt settings
+  const currentInvPaper = invSettings.paperSize || 'a4';
+  const currentInvHeader = invSettings.companyHeader || currentShopName || 'Siem Reap Angkor Guesthouse';
+  const currentInvSubtitle = invSettings.subtitle || bProfile.slogan || 'Hotel Folio & Motor Rental Official Receipt';
+  const currentInvPhone = invSettings.phone || bProfile.phone || '+855 016 308 199';
+  const currentInvAddress = invSettings.address || bProfile.address || 'Near Angkor Wat Main Gate, Siem Reap, Cambodia';
+  const currentInvTaxId = invSettings.taxNumber || 'K002-901829381';
+  const currentInvFooterNote = invSettings.footerNote || 'Thank you for choosing Siem Reap Angkor! We hope you have a pleasant stay near the temples.';
+  const currentInvShowLogo = invSettings.showLogo !== false;
+  const currentInvShowKhr = invSettings.showKhr !== false;
+  const currentInvShowSignatures = invSettings.showSignatures !== false;
+  const currentInvShowTaxId = invSettings.showTaxId !== false;
+  const currentInvShowGuestId = invSettings.showGuestId !== false;
+  const [invPreviewMode, setInvPreviewMode] = useState(invSettings.paperSize || 'a4');
+
+  const updateInvoiceSetting = (field, val) => {
+    setSettings(prev => ({
+      ...prev,
+      invoice_settings: {
+        ...(prev.invoice_settings || {}),
+        [field]: val
+      }
+    }));
+  };
 
   // Apply theme color dynamically to document styles
   const applyThemeColor = (hex, presetName = 'Custom') => {
@@ -170,6 +229,90 @@ export default function SettingsTab({
     }));
   };
 
+  // Helper to get active template field name
+  const getActiveTemplateField = (type = activeTemplateType) => {
+    switch (type) {
+      case 'rental': case 'checkout': return 'rentalAlertTemplate';
+      case 'return': case 'checkin': return 'returnAlertTemplate';
+      case 'room_checkin': return 'roomCheckinAlertTemplate';
+      case 'room_checkout': return 'roomCheckoutAlertTemplate';
+      case 'booking': return 'bookingAlertTemplate';
+      case 'revenue': return 'revenueAlertTemplate';
+      case 'maintenance': return 'maintenanceAlertTemplate';
+      case 'overdue': return 'overdueAlertTemplate';
+      case 'dashboard': return 'dashboardAlertTemplate';
+      case 'system': return 'systemAlertTemplate';
+      default: return 'rentalAlertTemplate';
+    }
+  };
+
+  // Helper to get active template string
+  const getActiveTemplateContent = (type = activeTemplateType) => {
+    switch (type) {
+      case 'rental': case 'checkout': return currentRentalTemplate;
+      case 'return': case 'checkin': return currentReturnTemplate;
+      case 'room_checkin': return currentRoomCheckinTemplate;
+      case 'room_checkout': return currentRoomCheckoutTemplate;
+      case 'booking': return currentBookingTemplate;
+      case 'revenue': return currentRevenueTemplate;
+      case 'maintenance': return currentMaintenanceTemplate;
+      case 'overdue': return currentOverdueTemplate;
+      case 'dashboard': return currentDashboardTemplate;
+      case 'system': return currentSystemTemplate;
+      default: return currentRentalTemplate;
+    }
+  };
+
+  // Load preset for current active template
+  const handleLoadPreset = (lang = 'kh') => {
+    const preset = ALERT_PRESETS[lang]?.[activeTemplateType];
+    if (!preset) return;
+    const field = getActiveTemplateField(activeTemplateType);
+
+    setSettings(prev => ({
+      ...prev,
+      telegram_settings: {
+        ...(prev.telegram_settings || {}),
+        [field]: preset,
+        ...(field === 'rentalAlertTemplate' ? { checkoutAlertTemplate: preset } : {}),
+        ...(field === 'returnAlertTemplate' ? { checkinAlertTemplate: preset } : {})
+      }
+    }));
+    setTestResultMsg({
+      type: 'success',
+      text: `Loaded ${lang === 'kh' ? 'Khmer (🇰🇭 ភាសាខ្មែរ)' : 'English (🇬🇧)'} preset for "${activeTemplateType}"!`
+    });
+  };
+
+  // Apply presets to ALL 10 alert templates in 1 click
+  const handleApplyAllPresets = (lang = 'kh') => {
+    const presets = ALERT_PRESETS[lang];
+    if (!presets) return;
+    setSettings(prev => ({
+      ...prev,
+      telegram_settings: {
+        ...(prev.telegram_settings || {}),
+        alertLanguage: lang,
+        rentalAlertTemplate: presets.rental,
+        checkoutAlertTemplate: presets.rental,
+        returnAlertTemplate: presets.return,
+        checkinAlertTemplate: presets.return,
+        roomCheckinAlertTemplate: presets.room_checkin,
+        roomCheckoutAlertTemplate: presets.room_checkout,
+        bookingAlertTemplate: presets.booking,
+        revenueAlertTemplate: presets.revenue,
+        maintenanceAlertTemplate: presets.maintenance,
+        overdueAlertTemplate: presets.overdue,
+        dashboardAlertTemplate: presets.dashboard,
+        systemAlertTemplate: presets.system
+      }
+    }));
+    setTestResultMsg({
+      type: 'success',
+      text: `All 10 alert templates have been set to ${lang === 'kh' ? 'Khmer (🇰🇭 ភាសាខ្មែរ)' : 'English (🇬🇧)'}!`
+    });
+  };
+
   // Insert tag into Telegram template at cursor position
   const handleInsertTag = (tag) => {
     let currentText = '';
@@ -214,21 +357,17 @@ export default function SettingsTab({
     setTestingTemplate(true);
     setTestResultMsg(null);
     try {
-      const activeTemplate =
-        (activeTemplateType === 'rental' || activeTemplateType === 'checkout')
-          ? currentRentalTemplate
-          : (activeTemplateType === 'return' || activeTemplateType === 'checkin')
-          ? currentReturnTemplate
-          : activeTemplateType === 'booking'
-          ? currentBookingTemplate
-          : currentRevenueTemplate;
+      const activeTemplate = getActiveTemplateContent(activeTemplateType);
 
       const res = await fetch('/api/telegram/test-template', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(auth?.headers || {}) },
         body: JSON.stringify({
           type: activeTemplateType,
-          template: activeTemplate
+          template: activeTemplate,
+          botToken: currentTgToken,
+          chatId: currentTgChatId,
+          lang: currentAlertLanguage
         })
       });
       const data = await res.json().catch(() => ({}));
@@ -253,6 +392,7 @@ export default function SettingsTab({
         ...settings,
         // Guarantee synchronization of shop settings
         shop_settings: {
+          ...(settings.shop_settings || {}),
           shopName: currentShopName,
           logo: currentLogo,
           rentalHoursPerDay: Number(currentRentalHours),
@@ -267,7 +407,18 @@ export default function SettingsTab({
         },
         invoice_settings: {
           ...(settings.invoice_settings || {}),
-          companyHeader: currentShopName
+          companyHeader: currentInvHeader,
+          paperSize: currentInvPaper,
+          subtitle: currentInvSubtitle,
+          phone: currentInvPhone,
+          address: currentInvAddress,
+          taxNumber: currentInvTaxId,
+          footerNote: currentInvFooterNote,
+          showLogo: currentInvShowLogo,
+          showKhr: currentInvShowKhr,
+          showSignatures: currentInvShowSignatures,
+          showTaxId: currentInvShowTaxId,
+          showGuestId: currentInvShowGuestId
         },
         theme_settings: {
           presetName: currentPresetName,
@@ -280,11 +431,15 @@ export default function SettingsTab({
           chatId: currentTgChatId,
           checkoutAlertEnabled: tgSet.checkoutAlertEnabled !== false,
           checkinAlertEnabled: tgSet.checkinAlertEnabled !== false,
+          roomCheckinAlertEnabled: tgSet.roomCheckinAlertEnabled !== false,
+          roomCheckoutAlertEnabled: tgSet.roomCheckoutAlertEnabled !== false,
           bookingAlertEnabled: tgSet.bookingAlertEnabled !== false,
           rentalAlertTemplate: currentRentalTemplate,
           checkoutAlertTemplate: currentRentalTemplate,
           returnAlertTemplate: currentReturnTemplate,
           checkinAlertTemplate: currentReturnTemplate,
+          roomCheckinAlertTemplate: currentRoomCheckinTemplate,
+          roomCheckoutAlertTemplate: currentRoomCheckoutTemplate,
           bookingAlertTemplate: currentBookingTemplate,
           revenueAlertTemplate: currentRevenueTemplate
         },
@@ -565,6 +720,7 @@ export default function SettingsTab({
   const SETTING_MODULES = [
     { id: 'shop_system',   label: 'Shop & System',       khmer: 'ការកំណត់ហាង & ប្រព័ន្ធ', icon: 'fa-store', badge: 'Main' },
     { id: 'ui_theme',      label: 'UI Theme / Colors',   khmer: 'ពណ៌ UI / Theme',          icon: 'fa-palette', badge: 'Branding' },
+    { id: 'invoice_pos',   label: 'Invoice & POS Print', khmer: 'វិក្កយបត្រ & ក្រដាស POS', icon: 'fa-print', badge: 'Folio' },
     { id: 'telegram_bot',  label: 'Telegram Alerts',     khmer: 'Telegram Bot & Template', icon: 'fa-paper-plane', badge: 'Alerts' },
     { id: 'notifications', label: 'Reminders & Emails',  khmer: 'ការជូនដំណឹង & រំលឹក',     icon: 'fa-bell', badge: 'Auto' },
     { id: 'backup_restore',label: 'Backup & Restore',    khmer: 'ទាញយក & បញ្ចូលទិន្នន័យ',   icon: 'fa-database', badge: 'Export/Import' },
@@ -1034,6 +1190,480 @@ export default function SettingsTab({
       )}
 
       {/* ═════════════════════════════════════════════════════════════════════ */}
+      {/* 2.5 វិក្កយបត្រ & ក្រដាស POS (Invoice & POS Paper Settings) */}
+      {/* ═════════════════════════════════════════════════════════════════════ */}
+      {activeSubTab === 'invoice_pos' && (
+        <div className="space-y-6">
+          <div className={`${cardCls} p-6`}>
+            {/* Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 mb-6 border-b border-stone-100 gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center font-bold text-lg border border-teal-100">
+                  <i className="fa-solid fa-print"></i>
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-stone-900">
+                    ការកំណត់វិក្កយបត្រ & ក្រដាសបោះពុម្ព POS (Invoice & POS Print Settings)
+                  </h3>
+                  <p className="text-xs text-stone-500">
+                    ជ្រើសរើសទំហំក្រដាសលំនាំដើម (A4 Folio, POS 80mm, POS 58mm), ក្បាលវិក្កយបត្រ, អាសយដ្ឋាន, និងកំណត់ត្រាខាងក្រោម
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleSaveAll}
+                className="bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-xs flex items-center gap-2 transition-colors cursor-pointer self-start sm:self-auto"
+              >
+                <i className="fa-solid fa-floppy-disk"></i>
+                <span>រក្សាទុកការកំណត់វិក្កយបត្រ (Save)</span>
+              </button>
+            </div>
+
+            {/* 1. Default Paper Size Selection */}
+            <div className="mb-8">
+              <label className="block text-xs font-bold text-stone-700 uppercase tracking-wider mb-3">
+                <i className="fa-solid fa-pager mr-1.5 text-teal-600"></i>
+                ទំហំក្រដាសលំនាំដើម (Default Paper Format for Checkout & History Printing)
+              </label>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {[
+                  {
+                    id: 'a4',
+                    title: '📄 A4 Standard Folio',
+                    kh: 'ក្រដាស A4 ផ្លូវការ (210mm)',
+                    desc: 'ទម្រង់សន្លឹកធំផ្លូវការ មានតារាងបន្ទប់លម្អិត, ហត្ថលេខាភ្ញៀវ & បេឡា ស័ក្តិសមសម្រាប់សណ្ឋាគារ & ភ្ញៀវស្នាក់នៅយូរ',
+                    badge: 'Official Folio',
+                    color: 'border-blue-300 bg-blue-50/40 text-blue-900'
+                  },
+                  {
+                    id: 'pos80',
+                    title: '🧾 POS Thermal 80mm',
+                    kh: 'ក្រដាសកម្ដៅ 80mm (Standard POS)',
+                    desc: 'កន្ទុយសំបុត្រស្តង់ដារសម្រាប់ម៉ាស៊ីនបោះពុម្ព Thermal នៅតុ Front-desk, អក្សរច្បាស់រហ័សទាន់ចិត្ត និងងាយស្រួលហុចជូនភ្ញៀវ',
+                    badge: 'Popular Front-Desk',
+                    color: 'border-emerald-300 bg-emerald-50/40 text-emerald-900'
+                  },
+                  {
+                    id: 'pos58',
+                    title: '🧾 POS Thermal 58mm',
+                    kh: 'ក្រដាសកម្ដៅតូច 58mm (Mini POS)',
+                    desc: 'ទំហំកន្ទុយសំបុត្រខ្នាតតូច សម្រាប់ម៉ាស៊ីនបោះពុម្ពចល័ត Bluetooth POS Printer ឬម៉ាស៊ីនសន្សំក្រដាស',
+                    badge: 'Compact Mini',
+                    color: 'border-amber-300 bg-amber-50/40 text-amber-900'
+                  }
+                ].map(format => {
+                  const isSelected = currentInvPaper === format.id;
+                  return (
+                    <div
+                      key={format.id}
+                      onClick={() => updateInvoiceSetting('paperSize', format.id)}
+                      className={`relative p-4 rounded-2xl border-2 cursor-pointer transition-all ${
+                        isSelected
+                          ? `${format.color} ring-2 ring-teal-500 shadow-md`
+                          : 'border-stone-200 bg-white hover:border-stone-300 hover:bg-stone-50/50'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="radio"
+                            name="defaultPaperSize"
+                            checked={isSelected}
+                            onChange={() => updateInvoiceSetting('paperSize', format.id)}
+                            className="w-4 h-4 accent-teal-600"
+                          />
+                          <span className="font-bold text-sm text-stone-900">{format.title}</span>
+                        </div>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-stone-100 text-stone-600 border border-stone-200">
+                          {format.badge}
+                        </span>
+                      </div>
+                      <p className="text-xs font-semibold text-stone-700 mb-1">{format.kh}</p>
+                      <p className="text-[11px] text-stone-500 leading-relaxed">{format.desc}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 2. Hotel / Business Details on Printed Folios */}
+            <div className="mb-8 pt-6 border-t border-stone-200">
+              <h4 className="text-xs font-bold text-stone-700 uppercase tracking-wider mb-4 flex items-center gap-2">
+                <i className="fa-solid fa-heading text-teal-600"></i>
+                ព័ត៌មានបង្ហាញលើក្បាលវិក្កយបត្រ (Printed Header & Business Details)
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-sm">
+                <div>
+                  <label className={labelCls}>
+                    <i className="fa-solid fa-hotel mr-1.5 text-stone-400"></i>
+                    Company / Hotel Header (ឈ្មោះលើក្បាលវិក្កយបត្រ)
+                  </label>
+                  <input
+                    type="text"
+                    value={currentInvHeader}
+                    onChange={e => updateInvoiceSetting('companyHeader', e.target.value)}
+                    placeholder="Siem Reap Angkor Guesthouse & Rental"
+                    className={`${inputCls} font-bold text-stone-900`}
+                  />
+                  <p className="text-[11px] text-stone-400 mt-1">Shown prominently at the very top of A4 folios and POS thermal receipts.</p>
+                </div>
+
+                <div>
+                  <label className={labelCls}>
+                    <i className="fa-solid fa-quote-left mr-1.5 text-stone-400"></i>
+                    Subtitle / Tagline (ចំណងជើងរង ឬពាក្យស្លោក)
+                  </label>
+                  <input
+                    type="text"
+                    value={currentInvSubtitle}
+                    onChange={e => updateInvoiceSetting('subtitle', e.target.value)}
+                    placeholder="Hotel Folio & Motor Rental Official Receipt"
+                    className={inputCls}
+                  />
+                  <p className="text-[11px] text-stone-400 mt-1">Printed directly under the hotel/business name.</p>
+                </div>
+
+                <div>
+                  <label className={labelCls}>
+                    <i className="fa-solid fa-phone mr-1.5 text-stone-400"></i>
+                    Hotline / Contact Phone (លេខទូរស័ព្ទទាក់ទង)
+                  </label>
+                  <input
+                    type="text"
+                    value={currentInvPhone}
+                    onChange={e => updateInvoiceSetting('phone', e.target.value)}
+                    placeholder="+855 016 308 199"
+                    className={inputCls}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>
+                    <i className="fa-solid fa-receipt mr-1.5 text-stone-400"></i>
+                    Tax / VAT Identification Number (លេខសារពើពន្ធ)
+                  </label>
+                  <input
+                    type="text"
+                    value={currentInvTaxId}
+                    onChange={e => updateInvoiceSetting('taxNumber', e.target.value)}
+                    placeholder="K002-901829381"
+                    className={`${inputCls} font-mono`}
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className={labelCls}>
+                    <i className="fa-solid fa-location-dot mr-1.5 text-stone-400"></i>
+                    Address (អាសយដ្ឋានសណ្ឋាគារ/ហាង)
+                  </label>
+                  <input
+                    type="text"
+                    value={currentInvAddress}
+                    onChange={e => updateInvoiceSetting('address', e.target.value)}
+                    placeholder="Near Angkor Wat Main Gate, Siem Reap, Kingdom of Cambodia"
+                    className={inputCls}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* 3. Toggles & Visibility Options */}
+            <div className="mb-8 pt-6 border-t border-stone-200">
+              <h4 className="text-xs font-bold text-stone-700 uppercase tracking-wider mb-4 flex items-center gap-2">
+                <i className="fa-solid fa-toggle-on text-teal-600"></i>
+                ការកំណត់បង្ហាញទិន្នន័យ (Invoice Content & Display Toggles)
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {[
+                  {
+                    key: 'showLogo',
+                    val: currentInvShowLogo,
+                    title: 'Show Logo on Folio',
+                    kh: 'បង្ហាញ Logo លើវិក្កយបត្រ',
+                    desc: 'Prints current business logo at the header of A4 sheets and POS slips'
+                  },
+                  {
+                    key: 'showKhr',
+                    val: currentInvShowKhr,
+                    title: 'Show Khmer Riel (KHR ៛)',
+                    kh: 'បង្ហាញតម្លៃជាប្រាក់រៀល',
+                    desc: 'Calculates and prints dual total in USD ($) and Khmer Riel (៛) automatically'
+                  },
+                  {
+                    key: 'showSignatures',
+                    val: currentInvShowSignatures,
+                    title: 'Show Signature Lines',
+                    kh: 'បង្ហាញកន្លែងចុះហត្ថលេខា',
+                    desc: 'Renders formal Guest Signature & Receptionist stamp blocks on A4 folios'
+                  },
+                  {
+                    key: 'showTaxId',
+                    val: currentInvShowTaxId,
+                    title: 'Show Tax / VAT ID',
+                    kh: 'បង្ហាញលេខសារពើពន្ធ',
+                    desc: 'Prints the VAT registration number on folios for official business accounting'
+                  },
+                  {
+                    key: 'showGuestId',
+                    val: currentInvShowGuestId,
+                    title: 'Show Guest ID / Passport',
+                    kh: 'បង្ហាញលេខអត្តសញ្ញាណប័ណ្ណ',
+                    desc: 'Displays the guest National ID or Passport Number on the printed folio'
+                  }
+                ].map(opt => (
+                  <div key={opt.key} className="flex items-start justify-between p-4 bg-stone-50 rounded-2xl border border-stone-200">
+                    <div className="pr-3">
+                      <span className="block font-bold text-xs text-stone-900">{opt.title}</span>
+                      <span className="block text-[11px] font-semibold text-teal-700">{opt.kh}</span>
+                      <span className="block text-[10px] text-stone-500 mt-1 leading-snug">{opt.desc}</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={opt.val}
+                      onChange={e => updateInvoiceSetting(opt.key, e.target.checked)}
+                      className="w-5 h-5 accent-teal-600 rounded cursor-pointer mt-0.5 shrink-0"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 4. Footer Thank You Note */}
+            <div className="mb-8 pt-6 border-t border-stone-200">
+              <label className={labelCls}>
+                <i className="fa-solid fa-heart mr-1.5 text-rose-500"></i>
+                Footer Thank You Note & Terms (កំណត់ត្រាថ្លែងអំណរគុណ ឬលក្ខខណ្ឌខាងក្រោម)
+              </label>
+              <textarea
+                rows={2}
+                value={currentInvFooterNote}
+                onChange={e => updateInvoiceSetting('footerNote', e.target.value)}
+                placeholder="Thank you for choosing Siem Reap Angkor! We hope you have a pleasant stay near the temples."
+                className={`${inputCls} resize-none`}
+              />
+              <p className="text-[11px] text-stone-400 mt-1">
+                Printed at the bottom of both A4 Folios and POS thermal slips as a polite sign-off or policy note.
+              </p>
+            </div>
+
+            {/* 5. Live Interactive Print Preview */}
+            <div className="pt-6 border-t border-stone-200">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h4 className="text-xs font-bold text-stone-700 uppercase tracking-wider flex items-center gap-2">
+                    <i className="fa-solid fa-eye text-teal-600"></i>
+                    មើលទម្រង់គំរូបោះពុម្ពផ្ទាល់ (Live Print Layout Preview)
+                  </h4>
+                  <p className="text-xs text-stone-500">មើលលទ្ធផលនៃការកំណត់ជាក់ស្តែងលើទម្រង់ A4 និង POS Thermal</p>
+                </div>
+                {/* Switcher */}
+                <div className="flex items-center gap-1.5 bg-stone-100 p-1 rounded-xl border border-stone-200">
+                  <button
+                    type="button"
+                    onClick={() => setInvPreviewMode('a4')}
+                    className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${
+                      invPreviewMode === 'a4' ? 'bg-white text-stone-900 shadow-xs' : 'text-stone-500 hover:text-stone-800'
+                    }`}
+                  >
+                    📄 A4 Folio
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInvPreviewMode('pos80')}
+                    className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${
+                      invPreviewMode === 'pos80' ? 'bg-white text-stone-900 shadow-xs' : 'text-stone-500 hover:text-stone-800'
+                    }`}
+                  >
+                    🧾 POS 80mm
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInvPreviewMode('pos58')}
+                    className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${
+                      invPreviewMode === 'pos58' ? 'bg-white text-stone-900 shadow-xs' : 'text-stone-500 hover:text-stone-800'
+                    }`}
+                  >
+                    🧾 POS 58mm
+                  </button>
+                </div>
+              </div>
+
+              {/* Preview Container */}
+              <div className="bg-stone-100/80 rounded-2xl p-6 border border-stone-200 flex justify-center overflow-x-auto">
+                {invPreviewMode === 'a4' ? (
+                  /* A4 Sheet Preview */
+                  <div className="bg-white rounded-xl shadow-lg border border-stone-300 p-8 w-full max-w-2xl text-stone-800 font-sans text-xs">
+                    {/* Header */}
+                    <div className="flex items-start justify-between pb-4 mb-4 border-b-2 border-stone-800">
+                      <div className="flex items-center gap-3">
+                        {currentInvShowLogo && (
+                          <div className="w-12 h-12 rounded-lg border border-stone-200 p-1 flex items-center justify-center bg-stone-50">
+                            {currentLogo ? (
+                              <img src={currentLogo} alt="Logo" className="max-h-full max-w-full object-contain" />
+                            ) : (
+                              <i className="fa-solid fa-hotel text-stone-400"></i>
+                            )}
+                          </div>
+                        )}
+                        <div>
+                          <h2 className="text-base font-black text-stone-900 uppercase tracking-tight">{currentInvHeader}</h2>
+                          <p className="text-[10px] text-stone-500">{currentInvSubtitle}</p>
+                          <p className="text-[10px] text-stone-400">{currentInvAddress} • Tel: {currentInvPhone}</p>
+                          {currentInvShowTaxId && <p className="text-[9px] text-stone-400 font-mono">VAT ID: {currentInvTaxId}</p>}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-sm font-black text-teal-700 tracking-wider">OFFICIAL FOLIO</span>
+                        <p className="text-[10px] font-mono text-stone-500">INV-2026-0089</p>
+                        <p className="text-[9px] text-stone-400">Date: {new Date().toISOString().slice(0, 10)}</p>
+                      </div>
+                    </div>
+
+                    {/* Guest info mock */}
+                    <div className="grid grid-cols-2 gap-3 p-3 bg-stone-50 rounded-xl mb-4 text-[11px]">
+                      <div>
+                        <span className="text-[10px] text-stone-400 uppercase block font-bold">Guest Details</span>
+                        <span className="font-bold text-stone-900">Mr. Sokha Chamroeun</span>
+                        {currentInvShowGuestId && <span className="text-stone-500 block">ID/Passport: 082910482</span>}
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[10px] text-stone-400 uppercase block font-bold">Stay Schedule</span>
+                        <span className="text-stone-700">Room 101 (Deluxe Double) • 2 Nights</span>
+                      </div>
+                    </div>
+
+                    {/* Table */}
+                    <table className="w-full text-left border-collapse mb-4 text-[11px]">
+                      <thead>
+                        <tr className="border-b border-stone-300 text-stone-500 text-[10px] uppercase font-bold">
+                          <th className="py-1">Description</th>
+                          <th className="py-1 text-center">Qty / Days</th>
+                          <th className="py-1 text-right">Rate</th>
+                          <th className="py-1 text-right">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-stone-100">
+                        <tr>
+                          <td className="py-1.5 font-medium">Room 101 - Deluxe King Bed</td>
+                          <td className="py-1.5 text-center">2 Nights</td>
+                          <td className="py-1.5 text-right">$35.00</td>
+                          <td className="py-1.5 text-right font-bold">$70.00</td>
+                        </tr>
+                        <tr>
+                          <td className="py-1.5 font-medium">Honda Scoopy Rental (125cc)</td>
+                          <td className="py-1.5 text-center">2 Days</td>
+                          <td className="py-1.5 text-right">$10.00</td>
+                          <td className="py-1.5 text-right font-bold">$20.00</td>
+                        </tr>
+                      </tbody>
+                    </table>
+
+                    {/* Totals */}
+                    <div className="border-t border-stone-300 pt-2 flex justify-end">
+                      <div className="w-48 space-y-1 text-right">
+                        <div className="flex justify-between text-[11px] text-stone-500">
+                          <span>Subtotal:</span>
+                          <span>$90.00</span>
+                        </div>
+                        <div className="flex justify-between font-black text-sm text-stone-900 pt-1 border-t border-stone-200">
+                          <span>Total USD:</span>
+                          <span className="text-teal-700">$90.00</span>
+                        </div>
+                        {currentInvShowKhr && (
+                          <div className="flex justify-between text-[11px] font-bold text-amber-700">
+                            <span>Total KHR (៛):</span>
+                            <span>369,000 ៛</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Signatures */}
+                    {currentInvShowSignatures && (
+                      <div className="grid grid-cols-2 gap-8 pt-8 mt-6 border-t border-dashed border-stone-200 text-center text-[10px] text-stone-500">
+                        <div>
+                          <div className="border-b border-stone-300 pb-8 mb-1"></div>
+                          <span className="font-semibold">Guest Signature</span>
+                        </div>
+                        <div>
+                          <div className="border-b border-stone-300 pb-8 mb-1"></div>
+                          <span className="font-semibold">Receptionist / Official Stamp</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Footer */}
+                    <div className="mt-6 pt-3 border-t border-stone-100 text-center text-[10px] text-stone-400 italic">
+                      {currentInvFooterNote}
+                    </div>
+                  </div>
+                ) : (
+                  /* POS Thermal Preview */
+                  <div className={`bg-white rounded-xl shadow-lg border border-stone-300 p-5 font-mono text-stone-900 text-xs ${
+                    invPreviewMode === 'pos58' ? 'max-w-[260px] text-[10px]' : 'max-w-[340px] text-[11px]'
+                  }`}>
+                    {/* POS Header */}
+                    <div className="text-center space-y-1 pb-3 border-b border-dashed border-stone-400">
+                      {currentInvShowLogo && currentLogo && (
+                        <img src={currentLogo} alt="Logo" className="w-8 h-8 object-contain mx-auto mb-1 filter grayscale" />
+                      )}
+                      <div className="font-black text-xs uppercase tracking-tight">{currentInvHeader}</div>
+                      <div className="text-[9px] text-stone-500">{currentInvSubtitle}</div>
+                      <div className="text-[9px] text-stone-500">{currentInvPhone}</div>
+                      {currentInvShowTaxId && <div className="text-[9px] text-stone-500">TAX ID: {currentInvTaxId}</div>}
+                      <div className="text-[9px] text-stone-400 pt-1">RECEIPT #2026-0089</div>
+                    </div>
+
+                    {/* Stay details */}
+                    <div className="py-2 border-b border-dashed border-stone-400 text-[10px] space-y-0.5">
+                      <div>Guest: Sokha Chamroeun</div>
+                      {currentInvShowGuestId && <div>ID: 082910482</div>}
+                      <div>Stay: 2 Nights (Room 101)</div>
+                      <div>Date: {new Date().toISOString().slice(0, 10)}</div>
+                    </div>
+
+                    {/* Items */}
+                    <div className="py-2 border-b border-dashed border-stone-400 space-y-1">
+                      <div className="flex justify-between font-bold text-[10px]">
+                        <span>Room 101 (2N @ $35)</span>
+                        <span>$70.00</span>
+                      </div>
+                      <div className="flex justify-between font-bold text-[10px]">
+                        <span>Scoopy Rental (2D @ $10)</span>
+                        <span>$20.00</span>
+                      </div>
+                    </div>
+
+                    {/* Totals */}
+                    <div className="py-2 border-b-2 border-stone-800 space-y-1">
+                      <div className="flex justify-between font-black text-sm">
+                        <span>TOTAL:</span>
+                        <span>$90.00</span>
+                      </div>
+                      {currentInvShowKhr && (
+                        <div className="flex justify-between font-bold text-[11px]">
+                          <span>TOTAL (KHR):</span>
+                          <span>369,000 ៛</span>
+                        </div>
+                      )}
+                      <div className="text-[9px] text-stone-500 pt-0.5">PAID VIA: CASH / ABA KHQR</div>
+                    </div>
+
+                    {/* POS Footer */}
+                    <div className="pt-3 text-center space-y-1 text-[9px] text-stone-500 italic">
+                      <p>{currentInvFooterNote}</p>
+                      <p className="font-bold uppercase tracking-widest text-[8px] text-stone-400 not-italic">*** THANK YOU ***</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═════════════════════════════════════════════════════════════════════ */}
       {/* 3. Telegram Bot Alert Settings */}
       {/* ═════════════════════════════════════════════════════════════════════ */}
       {activeSubTab === 'telegram_bot' && (
@@ -1058,7 +1688,10 @@ export default function SettingsTab({
                 onClick={async () => {
                   setTestResult('testing');
                   try {
-                    const r = await fetch('/api/settings/test', authPost({}));
+                    const r = await fetch('/api/settings/test', authPost({
+                      botToken: currentTgToken,
+                      chatId: currentTgChatId
+                    }));
                     const d = await r.json();
                     setTestResult(d.success ? 'success' : `Failed: ${d.error}`);
                   } catch (e) {
@@ -1153,7 +1786,7 @@ export default function SettingsTab({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6 p-4 bg-stone-50 rounded-2xl border border-stone-200">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-6 p-4 bg-stone-50 rounded-2xl border border-stone-200">
                 <label className="flex items-center gap-2.5 text-xs font-bold text-stone-800 cursor-pointer select-none">
                   <input
                     type="checkbox"
@@ -1165,7 +1798,7 @@ export default function SettingsTab({
                     className="rounded text-brand-500 focus:ring-brand-500 h-4 w-4"
                   />
                   <span className="flex items-center gap-1.5">
-                    <i className="fa-solid fa-clipboard-check text-blue-500"></i> Check-Out Alert (ចេញ)
+                    <i className="fa-solid fa-motorcycle text-brand-500"></i> Motor Check-Out
                   </span>
                 </label>
 
@@ -1180,7 +1813,37 @@ export default function SettingsTab({
                     className="rounded text-brand-500 focus:ring-brand-500 h-4 w-4"
                   />
                   <span className="flex items-center gap-1.5">
-                    <i className="fa-solid fa-rotate-left text-emerald-500"></i> Check-In / Return (ចូល)
+                    <i className="fa-solid fa-rotate-left text-emerald-500"></i> Motor Return
+                  </span>
+                </label>
+
+                <label className="flex items-center gap-2.5 text-xs font-bold text-stone-800 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={tgSet.roomCheckinAlertEnabled !== false}
+                    onChange={e => setSettings(prev => ({
+                      ...prev,
+                      telegram_settings: { ...(prev.telegram_settings || {}), roomCheckinAlertEnabled: e.target.checked }
+                    }))}
+                    className="rounded text-brand-500 focus:ring-brand-500 h-4 w-4"
+                  />
+                  <span className="flex items-center gap-1.5">
+                    <i className="fa-solid fa-hotel text-blue-500"></i> Room Check-In
+                  </span>
+                </label>
+
+                <label className="flex items-center gap-2.5 text-xs font-bold text-stone-800 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={tgSet.roomCheckoutAlertEnabled !== false}
+                    onChange={e => setSettings(prev => ({
+                      ...prev,
+                      telegram_settings: { ...(prev.telegram_settings || {}), roomCheckoutAlertEnabled: e.target.checked }
+                    }))}
+                    className="rounded text-brand-500 focus:ring-brand-500 h-4 w-4"
+                  />
+                  <span className="flex items-center gap-1.5">
+                    <i className="fa-solid fa-door-open text-amber-500"></i> Room Check-Out
                   </span>
                 </label>
 
@@ -1195,35 +1858,100 @@ export default function SettingsTab({
                     className="rounded text-brand-500 focus:ring-brand-500 h-4 w-4"
                   />
                   <span className="flex items-center gap-1.5">
-                    <i className="fa-solid fa-calendar-check text-purple-500"></i> Booking Alert (ការកក់)
+                    <i className="fa-solid fa-calendar-check text-purple-500"></i> Booking Alert
                   </span>
                 </label>
               </div>
 
-              {/* Custom Alert Templates */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-                <div>
-                  <h4 className="font-bold text-sm text-stone-900 flex items-center gap-2">
-                    <i className="fa-solid fa-file-code text-blue-600"></i>
-                    Custom Alert Templates (កែសម្រួលទម្រង់សារជូនដំណឹង)
-                  </h4>
-                  <p className="text-xs text-stone-500">អ្នកអាចកំណត់ពាក្យ ភាសា និង Dynamic Tags តាមតម្រូវការ</p>
+              {/* Custom Alert Templates Header & Language Bar */}
+              <div className="bg-gradient-to-r from-stone-50 to-amber-50/40 p-4 rounded-2xl border border-stone-200 mb-5">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-stone-200/80 mb-3">
+                  <div>
+                    <h4 className="font-bold text-sm text-stone-900 flex items-center gap-2">
+                      <i className="fa-solid fa-file-code text-brand-600"></i>
+                      Custom Alert Templates (កែសម្រួលទម្រង់សារជូនដំណឹង Telegram)
+                    </h4>
+                    <p className="text-xs text-stone-500 mt-0.5">
+                      ប្ដូរពាក្យ ភាសា (ខ្មែរ ឬ អង់គ្លេស) និង Placeholders សម្រាប់គ្រប់ប្រភេទ Alert ក្នុងប្រព័ន្ធ
+                    </p>
+                  </div>
+
+                  {/* Language Settings & Global Presets */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-xl border border-stone-200 shadow-2xs">
+                      <span className="text-[11px] font-bold text-stone-500">Default Language:</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSettings(prev => ({
+                            ...prev,
+                            telegram_settings: { ...(prev.telegram_settings || {}), alertLanguage: 'kh' }
+                          }));
+                        }}
+                        className={`px-2 py-0.5 rounded-md text-xs font-bold transition-all cursor-pointer ${
+                          currentAlertLanguage === 'kh' ? 'bg-amber-500 text-white shadow-2xs' : 'text-stone-600 hover:text-stone-900'
+                        }`}
+                      >
+                        🇰🇭 ខ្មែរ
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSettings(prev => ({
+                            ...prev,
+                            telegram_settings: { ...(prev.telegram_settings || {}), alertLanguage: 'en' }
+                          }));
+                        }}
+                        className={`px-2 py-0.5 rounded-md text-xs font-bold transition-all cursor-pointer ${
+                          currentAlertLanguage === 'en' ? 'bg-brand-600 text-white shadow-2xs' : 'text-stone-600 hover:text-stone-900'
+                        }`}
+                      >
+                        🇬🇧 EN
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleApplyAllPresets('kh')}
+                      className="px-2.5 py-1.5 bg-white hover:bg-amber-50 border border-amber-200 text-amber-900 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                      title="កំណត់គ្រប់ទម្រង់សារទាំងអស់ជាភាសាខ្មែរ"
+                    >
+                      <span>🇰🇭 ដាក់ខ្មែរទាំងអស់</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleApplyAllPresets('en')}
+                      className="px-2.5 py-1.5 bg-white hover:bg-sky-50 border border-sky-200 text-sky-900 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                      title="Set all templates to English presets"
+                    >
+                      <span>🇬🇧 Set All EN</span>
+                    </button>
+                  </div>
                 </div>
 
-                {/* Subtabs for Templates */}
-                <div className="flex flex-wrap gap-1.5 bg-stone-100 p-1 rounded-xl">
+                {/* Subtabs for All 10 System Alert Templates */}
+                <div className="flex flex-wrap gap-1">
                   {[
-                    { id: 'rental', label: 'Check-Out Alert (ចេញ)', icon: 'fa-clipboard-check' },
-                    { id: 'return', label: 'Check-In / Return (ចូល)', icon: 'fa-rotate-left' },
-                    { id: 'booking', label: 'Booking Alert (ការកក់)', icon: 'fa-calendar-check' },
-                    { id: 'revenue', label: 'Payment / Income (ចំណូល)', icon: 'fa-file-invoice-dollar' },
+                    { id: 'rental', label: 'ចេញម៉ូតូ (Motor Out)', icon: 'fa-motorcycle' },
+                    { id: 'return', label: 'ចូលម៉ូតូ (Motor Return)', icon: 'fa-rotate-left' },
+                    { id: 'room_checkin', label: 'ចូលបន្ទប់ (Room In)', icon: 'fa-hotel' },
+                    { id: 'room_checkout', label: 'ចេញបន្ទប់ (Room Out)', icon: 'fa-door-open' },
+                    { id: 'booking', label: 'ការកក់ (Booking)', icon: 'fa-calendar-check' },
+                    { id: 'revenue', label: 'ចំណូល (Income)', icon: 'fa-file-invoice-dollar' },
+                    { id: 'maintenance', label: 'ជួសជុល (Maintenance)', icon: 'fa-wrench' },
+                    { id: 'overdue', label: 'ហួសពេល (Overdue)', icon: 'fa-triangle-exclamation' },
+                    { id: 'dashboard', label: 'សង្ខេប (Dashboard)', icon: 'fa-gauge' },
+                    { id: 'system', label: 'សេចក្តីជូនដំណឹង (Staff Notice)', icon: 'fa-bullhorn' }
                   ].map(t => (
                     <button
                       key={t.id}
                       type="button"
                       onClick={() => setActiveTemplateType(t.id)}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                        activeTemplateType === t.id ? 'bg-white text-stone-900 shadow-xs' : 'text-stone-500 hover:text-stone-800'
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        activeTemplateType === t.id
+                          ? 'bg-brand-500 text-white shadow-xs'
+                          : 'bg-white text-stone-600 hover:bg-stone-100 border border-stone-200/70'
                       }`}
                     >
                       <i className={`fa-solid ${t.icon} text-xs`}></i>
@@ -1233,30 +1961,64 @@ export default function SettingsTab({
                 </div>
               </div>
 
-              {/* Tag Insertion Buttons */}
-              <div className="mb-3 bg-stone-50 p-3.5 rounded-2xl border border-stone-200">
-                <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block mb-2">
-                  Available Placeholders for {activeTemplateType.toUpperCase()} (ចុចដើម្បីបញ្ចូល Tag ទៅក្នុងទម្រង់សារ):
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  {(
-                    activeTemplateType === 'booking'
-                      ? ['{booking_ref}', '{type}', '{item_name}', '{customer_name}', '{phone}', '{start_date}', '{end_date}', '{total_amount}', '{deposit}', '{notes}', '{time}']
-                      : (activeTemplateType === 'return' || activeTemplateType === 'checkin')
-                      ? ['{customer_name}', '{phone}', '{bike_model}', '{plate_number}', '{item_name}', '{return_date}', '{late_fee}', '{damage_fee}', '{deposit_returned}', '{staff_name}', '{time}']
-                      : activeTemplateType === 'revenue'
-                      ? ['{invoice_id}', '{customer_name}', '{amount}', '{payment_method}', '{time}']
-                      : ['{customer_name}', '{phone}', '{bike_model}', '{plate_number}', '{item_name}', '{start_date}', '{end_date}', '{total_amount}', '{deposit}', '{payment_method}', '{staff_name}', '{time}']
-                  ).map(tag => (
-                    <button
-                      key={tag}
-                      type="button"
-                      onClick={() => handleInsertTag(tag)}
-                      className="text-[11px] font-mono font-semibold bg-white hover:bg-brand-50 hover:text-brand-700 text-stone-700 px-2 py-1 rounded-lg border border-stone-200 transition-colors shadow-2xs cursor-pointer"
-                    >
-                      + {tag}
-                    </button>
-                  ))}
+              {/* Tag Insertion Buttons & Single-Template Preset Buttons */}
+              <div className="mb-3 bg-stone-50 p-3.5 rounded-2xl border border-stone-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex-1">
+                  <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block mb-2">
+                    Available Tags for {activeTemplateType.toUpperCase()} (ចុចដើម្បីបញ្ចូល Tag ទៅក្នុងទម្រង់សារ):
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(
+                      activeTemplateType === 'room_checkin'
+                        ? ['{room_name}', '{bed_type}', '{floor}', '{guest_name}', '{phone}', '{check_in_date}', '{check_out_date}', '{total_price}', '{payment_method}', '{staff_name}', '{notes}', '{time}']
+                        : activeTemplateType === 'room_checkout'
+                        ? ['{room_name}', '{bed_type}', '{guest_name}', '{phone}', '{check_in_date}', '{check_out_date}', '{staff_name}', '{notes}', '{time}']
+                        : activeTemplateType === 'booking'
+                        ? ['{booking_ref}', '{type}', '{item_name}', '{customer_name}', '{phone}', '{start_date}', '{end_date}', '{total_amount}', '{deposit}', '{notes}', '{time}']
+                        : (activeTemplateType === 'return' || activeTemplateType === 'checkin')
+                        ? ['{customer_name}', '{phone}', '{bike_model}', '{plate_number}', '{start_date}', '{end_date}', '{return_date}', '{total_amount}', '{deposit}', '{late_fee}', '{damage_fee}', '{deposit_returned}', '{payment_method}', '{staff_name}', '{time}']
+                        : activeTemplateType === 'revenue'
+                        ? ['{invoice_id}', '{customer_name}', '{amount}', '{payment_method}', '{time}']
+                        : activeTemplateType === 'maintenance'
+                        ? ['{service_type}', '{target_name}', '{description}', '{cost}', '{technician}', '{time}']
+                        : activeTemplateType === 'overdue'
+                        ? ['{subject}', '{customer_name}', '{phone}', '{item_name}', '{overdue_duration}', '{time}']
+                        : activeTemplateType === 'dashboard'
+                        ? ['{occupied_rooms}', '{vacant_rooms}', '{active_rentals}', '{available_bikes}', '{today_revenue}', '{new_bookings}', '{time}']
+                        : activeTemplateType === 'system'
+                        ? ['{title}', '{message}', '{staff_name}', '{time}']
+                        : ['{customer_name}', '{phone}', '{bike_model}', '{plate_number}', '{start_date}', '{end_date}', '{total_amount}', '{deposit}', '{payment_method}', '{staff_name}', '{time}']
+                    ).map(tag => (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => handleInsertTag(tag)}
+                        className="text-[11px] font-mono font-semibold bg-white hover:bg-brand-50 hover:text-brand-700 text-stone-700 px-2 py-1 rounded-lg border border-stone-200 transition-colors shadow-2xs cursor-pointer"
+                      >
+                        + {tag}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Per-Template Preset Buttons */}
+                <div className="flex items-center gap-1.5 shrink-0 self-start sm:self-center border-t sm:border-t-0 sm:border-l border-stone-200 pt-2 sm:pt-0 sm:pl-3">
+                  <button
+                    type="button"
+                    onClick={() => handleLoadPreset('kh')}
+                    className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                    title="ផ្ទុកទម្រង់សារគំរូភាសាខ្មែរសម្រាប់ប្រភេទនេះ"
+                  >
+                    <span>🇰🇭 គំរូខ្មែរ</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleLoadPreset('en')}
+                    className="px-2.5 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-900 border border-sky-300 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                    title="Load English preset for this alert type"
+                  >
+                    <span>🇬🇧 Load EN</span>
+                  </button>
                 </div>
               </div>
 
@@ -1265,26 +2027,11 @@ export default function SettingsTab({
                 <div className="space-y-3">
                   <textarea
                     ref={templateTextareaRef}
-                    rows={8}
-                    value={
-                      activeTemplateType === 'rental' || activeTemplateType === 'checkout'
-                        ? currentRentalTemplate
-                        : activeTemplateType === 'return' || activeTemplateType === 'checkin'
-                        ? currentReturnTemplate
-                        : activeTemplateType === 'booking'
-                        ? currentBookingTemplate
-                        : currentRevenueTemplate
-                    }
+                    rows={9}
+                    value={getActiveTemplateContent(activeTemplateType)}
                     onChange={e => {
                       const val = e.target.value;
-                      const field =
-                        activeTemplateType === 'rental' || activeTemplateType === 'checkout'
-                          ? 'rentalAlertTemplate'
-                          : activeTemplateType === 'return' || activeTemplateType === 'checkin'
-                          ? 'returnAlertTemplate'
-                          : activeTemplateType === 'booking'
-                          ? 'bookingAlertTemplate'
-                          : 'revenueAlertTemplate';
+                      const field = getActiveTemplateField(activeTemplateType);
                       setSettings(prev => ({
                         ...prev,
                         telegram_settings: {
@@ -1333,37 +2080,50 @@ export default function SettingsTab({
                     <div
                       className="whitespace-pre-wrap leading-relaxed text-slate-100"
                       dangerouslySetInnerHTML={{
-                        __html: (
-                          activeTemplateType === 'rental' || activeTemplateType === 'checkout'
-                            ? currentRentalTemplate
-                            : activeTemplateType === 'return' || activeTemplateType === 'checkin'
-                            ? currentReturnTemplate
-                            : activeTemplateType === 'booking'
-                            ? currentBookingTemplate
-                            : currentRevenueTemplate
-                        )
+                        __html: getActiveTemplateContent(activeTemplateType)
                           .replace(/{booking_ref}/gi, 'SR-BK-88421')
                           .replace(/{type}/gi, 'Motor Rental (ជួលម៉ូតូ)')
                           .replace(/{item_name}/gi, 'Honda Scoopy 2024')
-                          .replace(/{customer_name}/gi, 'John Doe')
+                          .replace(/{customer_name}/gi, 'សុខ សុភា (John Doe)')
+                          .replace(/{guest_name}/gi, 'សុខ សុភា (John Doe)')
                           .replace(/{phone}/gi, '+855 12 345 678')
                           .replace(/{bike_model}/gi, 'Honda Scoopy 2024')
                           .replace(/{plate_number}/gi, '1AB-2345')
-                          .replace(/{room_name}/gi, 'Deluxe Room #101')
-                          .replace(/{start_date}/gi, '2026-09-13')
-                          .replace(/{end_date}/gi, '2026-09-16')
+                          .replace(/{room_name}/gi, 'បន្ទប់លេខ 101 (Deluxe)')
+                          .replace(/{bed_type}/gi, '1 Queen Bed')
+                          .replace(/{floor}/gi, '1')
+                          .replace(/{check_in_date}/gi, '2026-09-20')
+                          .replace(/{check_out_date}/gi, '2026-09-23')
+                          .replace(/{start_date}/gi, '2026-09-20')
+                          .replace(/{end_date}/gi, '2026-09-23')
+                          .replace(/{total_price}/gi, '75.00')
                           .replace(/{total_amount}/gi, '45.00')
                           .replace(/{deposit}/gi, '50.00')
-                          .replace(/{return_date}/gi, '2026-09-16')
+                          .replace(/{return_date}/gi, '2026-09-23')
                           .replace(/{late_fee}/gi, '0.00')
                           .replace(/{damage_fee}/gi, '0.00')
                           .replace(/{deposit_returned}/gi, '50.00')
                           .replace(/{payment_method}/gi, 'ABA KHQR')
-                          .replace(/{staff_name}/gi, 'Admin / Reception')
-                          .replace(/{notes}/gi, 'Customer requested helmet')
-                          .replace(/{invoice_id}/gi, 'INV-9021')
-                          .replace(/{amount}/gi, '45.00')
-                          .replace(/{time}/gi, '13:00, 13/09/2026')
+                          .replace(/{staff_name}/gi, 'Receptionist / Admin')
+                          .replace(/{notes}/gi, 'No special requests')
+                          .replace(/{invoice_id}/gi, 'INV-2026-088')
+                          .replace(/{amount}/gi, '75.00')
+                          .replace(/{service_type}/gi, 'Air Conditioner Servicing')
+                          .replace(/{target_name}/gi, 'Room 201')
+                          .replace(/{description}/gi, 'Clean filters and gas refill')
+                          .replace(/{cost}/gi, '35.00')
+                          .replace(/{technician}/gi, 'Mr. Sokha')
+                          .replace(/{subject}/gi, 'Overdue Motor Rental Warning')
+                          .replace(/{overdue_duration}/gi, '2 Hours Overdue')
+                          .replace(/{occupied_rooms}/gi, '8')
+                          .replace(/{vacant_rooms}/gi, '12')
+                          .replace(/{active_rentals}/gi, '14')
+                          .replace(/{available_bikes}/gi, '6')
+                          .replace(/{today_revenue}/gi, '420.00')
+                          .replace(/{new_bookings}/gi, '5')
+                          .replace(/{title}/gi, 'Staff Announcement')
+                          .replace(/{message}/gi, 'Please inspect all rooms and motor fleet updates.')
+                          .replace(/{time}/gi, '20/09/2026, 10:00')
                       }}
                     />
                   </div>

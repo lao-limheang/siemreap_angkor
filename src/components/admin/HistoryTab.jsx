@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import PaginationControls from '../common/PaginationControls';
 import { RentalService } from '../../services/DatabaseService';
 import { useModal } from '../common/ModalProvider';
+import RoomInvoiceModal from './RoomInvoiceModal';
 
 export default function HistoryTab({
   rentals = [],
@@ -18,7 +19,8 @@ export default function HistoryTab({
   statusBadge,
   currency = 'USD',
   sendCategoryTelegramAlert,
-  tgSending
+  tgSending,
+  settings = {}
 }) {
   const { showModal, showConfirm } = useModal();
   const [localTgSending, setLocalTgSending] = useState(false);
@@ -65,6 +67,7 @@ export default function HistoryTab({
   const [pageSize, setPageSize] = useState(10);
   const [editingRental, setEditingRental] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [printRental, setPrintRental] = useState(null);
 
   const filtered = useMemo(() => {
     const list = (rentals || []).filter(r => {
@@ -388,6 +391,35 @@ export default function HistoryTab({
                   <td className="p-4 text-center">
                     <div className="flex items-center justify-center gap-1.5">
                       <button
+                        type="button"
+                        onClick={() => {
+                          setPrintRental({
+                            id: r.id,
+                            guestName: r.guestName || r.customerName || 'Customer',
+                            guestPhone: r.guestPhone || r.phone || 'N/A',
+                            checkInDate: r.startDate || r.checkoutDate || '2026-09-20',
+                            checkOutDate: r.endDate || r.returnDueDate || '2026-09-20',
+                            totalAmount: Number(r.totalPrice || 0),
+                            paymentMethod: r.paymentMethod || 'cash',
+                            paymentStatus: r.status === 'active' ? 'unpaid' : 'paid',
+                            invoiceNumber: `INV-MOTO-${r.id}-${(r.startDate || '20260920').replace(/-/g, '')}`,
+                            customItems: [
+                              {
+                                description: `Motor Rental: ${r.bikeName || 'Motorbike'} (${r.plateNumber || 'Fleet'})`,
+                                subtitle: `Rental period ${r.startDate || ''} to ${r.endDate || ''}`,
+                                qty: 1,
+                                rate: Number(r.totalPrice || 0),
+                                total: Number(r.totalPrice || 0)
+                              }
+                            ]
+                          });
+                        }}
+                        className="px-2 py-1 bg-brand-50 text-brand-700 hover:bg-brand-100 border border-brand-200 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                        title="Print Rental Invoice / Folio (A4 or POS)"
+                      >
+                        <i className="fa-solid fa-print text-[10px]"></i> Print
+                      </button>
+                      <button
                         onClick={() => handleStartEdit(r)}
                         className="w-7 h-7 flex items-center justify-center text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors cursor-pointer"
                         title="Edit Rental Record"
@@ -573,6 +605,19 @@ export default function HistoryTab({
             </form>
           </div>
         </div>
+      )}
+
+      {/* Printable Invoice Modal (A4 & POS) */}
+      {printRental && (
+        <RoomInvoiceModal
+          isOpen={!!printRental}
+          onClose={() => setPrintRental(null)}
+          occupancy={printRental}
+          relatedOccupancies={[]}
+          rooms={[]}
+          settings={settings}
+          currency={typeof currency === 'function' ? currency : (v) => `$${Number(v || 0).toFixed(2)}`}
+        />
       )}
     </div>
   );
