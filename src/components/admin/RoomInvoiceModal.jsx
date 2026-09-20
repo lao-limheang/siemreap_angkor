@@ -114,16 +114,108 @@ export default function RoomInvoiceModal({
   const paymentStatus = (primaryStay.paymentStatus || 'paid').toUpperCase();
   const paymentMethod = (primaryStay.paymentMethod || 'cash').toUpperCase();
 
-  const handlePrint = () => {
-    window.print();
-  };
-
   const isPos = paperFormat === 'pos80' || paperFormat === 'pos58';
   const posWidthClass = paperFormat === 'pos58' ? 'max-w-[290px]' : 'max-w-[360px]';
 
+  const handlePrint = () => {
+    const printableEl = printRef.current;
+    if (!printableEl) {
+      window.print();
+      return;
+    }
+
+    let iframe = document.getElementById('hidden-invoice-print-frame');
+    if (!iframe) {
+      iframe = document.createElement('iframe');
+      iframe.id = 'hidden-invoice-print-frame';
+      iframe.style.position = 'fixed';
+      iframe.style.top = '-9999px';
+      iframe.style.left = '-9999px';
+      iframe.style.width = '0px';
+      iframe.style.height = '0px';
+      iframe.style.border = 'none';
+      document.body.appendChild(iframe);
+    }
+
+    let stylesHtml = '';
+    document.querySelectorAll('style, link[rel="stylesheet"]').forEach(el => {
+      stylesHtml += el.outerHTML + '\n';
+    });
+
+    const isPosFormat = paperFormat === 'pos80' || paperFormat === 'pos58';
+    const pageSize = paperFormat === 'pos58' ? '58mm auto' : paperFormat === 'pos80' ? '80mm auto' : 'A4 portrait';
+    const pageMargin = isPosFormat ? '0mm' : '8mm';
+    const containerWidth = paperFormat === 'pos58' ? '54mm' : paperFormat === 'pos80' ? '76mm' : '100%';
+
+    const iframeDoc = iframe.contentWindow.document;
+    iframeDoc.open();
+    iframeDoc.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>${invoiceNumber || 'Guest Invoice & Folio'}</title>
+          ${stylesHtml}
+          <style>
+            @page {
+              size: ${pageSize} !important;
+              margin: ${pageMargin} !important;
+            }
+            html, body {
+              margin: 0 !important;
+              padding: 0 !important;
+              background: #ffffff !important;
+              color: #111827 !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            body {
+              font-family: ${isPosFormat ? 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' : 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'} !important;
+              padding: ${isPosFormat ? '1mm 2mm' : '0'} !important;
+            }
+            .invoice-print-wrapper {
+              width: 100% !important;
+              max-width: ${containerWidth} !important;
+              margin: 0 auto !important;
+              background: #ffffff !important;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="invoice-print-wrapper">
+            ${printableEl.innerHTML}
+          </div>
+        </body>
+      </html>
+    `);
+    iframeDoc.close();
+
+    setTimeout(() => {
+      try {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+      } catch (e) {
+        console.warn('Iframe print error, falling back to window.print():', e);
+        window.print();
+      }
+    }, 280);
+  };
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        handlePrint();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, paperFormat, occupancy, relatedOccupancies]);
+
   return (
     <div 
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-stone-950/75 backdrop-blur-xs overflow-y-auto print:p-0 print:bg-white print:static print:overflow-visible"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-stone-950/75 backdrop-blur-xs overflow-y-auto invoice-modal-overlay print:p-0 print:bg-white print:static print:overflow-visible"
       onClick={onClose}
     >
       {/* Print media dynamic styling for A4 vs POS thermal paper */}
@@ -152,7 +244,6 @@ export default function RoomInvoiceModal({
 
       {/* Container */}
       <div 
-        ref={printRef}
         onClick={(e) => e.stopPropagation()}
         className={`bg-white rounded-3xl shadow-2xl border border-stone-200 overflow-hidden modal-pop my-auto printable-invoice-container print:shadow-none print:border-none print:rounded-none relative z-10 ${
           isPos ? posWidthClass : 'w-full max-w-3xl'
@@ -233,9 +324,11 @@ export default function RoomInvoiceModal({
           </div>
         </div>
 
-        {/* ═══════════════════════════════════════════════════════════════ */}
-        {/* VIEW 1: STANDARD A4 OFFICIAL FOLIO                             */}
-        {/* ═══════════════════════════════════════════════════════════════ */}
+        {/* Printable Area (Targeted for isolated printing) */}
+        <div ref={printRef} id="invoice-printable-content" className="bg-white">
+          {/* ═══════════════════════════════════════════════════════════════ */}
+          {/* VIEW 1: STANDARD A4 OFFICIAL FOLIO                             */}
+          {/* ═══════════════════════════════════════════════════════════════ */}
         {paperFormat === 'a4' && (
           <div className="p-6 sm:p-10 text-stone-900 print:p-8 bg-white font-sans text-xs">
             {/* Header */}
@@ -529,6 +622,7 @@ export default function RoomInvoiceModal({
             </div>
           </div>
         )}
+        </div>
       </div>
     </div>
   );

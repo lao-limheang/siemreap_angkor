@@ -278,10 +278,19 @@ body {
   input,
   select,
   .pagination,
-  .fixed,
-  .modal-overlay,
+  .fixed:not(.invoice-modal-overlay),
+  .modal-overlay:not(.invoice-modal-overlay),
   .quick-actions {
     display: none !important;
+  }
+
+  /* When printing invoice modal directly */
+  .invoice-modal-overlay {
+    display: block !important;
+    position: static !important;
+    background: #ffffff !important;
+    padding: 0 !important;
+    margin: 0 !important;
   }
 
   /* Expand full width for report containers */

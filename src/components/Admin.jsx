@@ -39,6 +39,7 @@ import RoomBookingsTab from './admin/RoomBookingsTab';
 import SettingsTab from './admin/SettingsTab';
 import ReportsTab from './admin/ReportsTab';
 import RoomInvoiceModal from './admin/RoomInvoiceModal';
+import DashboardPrintModal from './admin/DashboardPrintModal';
 import { normalizeRental, normalizeBooking, normalizeRoom, normalizeMoto, normalizeModel, normalizeBedCategory, asArray, toDateStr } from '../utils/dataNormalizer';
 import { fileToBase64 } from '../utils/imageUtils';
 import PaginationControls from './common/PaginationControls';
@@ -763,6 +764,7 @@ export default function Admin() {
               onNavigateTab={setActiveTab}
               sendCategoryTelegramAlert={sendCategoryTelegramAlert}
               tgSending={tgSending}
+              settings={settings}
             />
           )}
 
@@ -3578,8 +3580,9 @@ function FleetTab({ bikes, models, setBikes, setModels, auth, fetchAll, inputCls
 
 // SettingsTab is imported from ./admin/SettingsTab
 
-function DashboardTab({ bikes, models, rentals, bookings, rooms, cardCls, loadingData, currency, onNavigateTab, sendCategoryTelegramAlert, tgSending }) {
+function DashboardTab({ bikes, models, rentals, bookings, rooms, cardCls, loadingData, currency, onNavigateTab, sendCategoryTelegramAlert, tgSending, settings = {} }) {
   const [modalState, setModalState] = useState({ open: false, title: '', type: '' });
+  const [printModalOpen, setPrintModalOpen] = useState(false);
   const [recentFilter, setRecentFilter] = useState('all'); // 'all' | 'active' | 'returned' | 'overdue'
   const [recentSort, setRecentSort] = useState('date-desc'); // 'date-desc' | 'date-asc' | 'name-asc' | 'name-desc' | 'price-desc' | 'price-asc'
   const [recentSearch, setRecentSearch] = useState('');
@@ -3700,7 +3703,7 @@ function DashboardTab({ bikes, models, rentals, bookings, rooms, cardCls, loadin
           <p className="text-xs text-stone-500 mt-1">{new Date().toLocaleDateString('km-KH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
         </div>
         <div className="flex items-center gap-2.5">
-          <button onClick={()=>window.print()} className="px-4 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-bold rounded-xl transition flex items-center gap-2">
+          <button onClick={()=>setPrintModalOpen(true)} className="px-4 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-bold rounded-xl transition flex items-center gap-2 cursor-pointer shadow-2xs">
             <i className="fa-solid fa-print"></i> បោះពុម្ព (Print)
           </button>
         </div>
@@ -3962,7 +3965,7 @@ function DashboardTab({ bikes, models, rentals, bookings, rooms, cardCls, loadin
             <div className="flex items-center gap-1.5 shrink-0">
               <button
                 type="button"
-                onClick={() => window.print()}
+                onClick={() => setPrintModalOpen(true)}
                 className="px-2.5 py-1.5 bg-white hover:bg-stone-100 border border-stone-200 text-stone-700 text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
                 title="បោះពុម្ពបញ្ជីការជួល (Print Recent Rentals)"
               >
@@ -4199,6 +4202,17 @@ function DashboardTab({ bikes, models, rentals, bookings, rooms, cardCls, loadin
           </div>
         </div>
       )}
+      {/* Dashboard Print Modal (A4 & POS) */}
+      <DashboardPrintModal
+        isOpen={printModalOpen}
+        onClose={() => setPrintModalOpen(false)}
+        bikes={bikes}
+        rooms={rooms}
+        rentals={rentals}
+        bookings={bookings}
+        settings={settings}
+        currency={currency}
+      />
     </div>
   );
 }
