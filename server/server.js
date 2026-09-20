@@ -211,6 +211,10 @@ const db = new sqlite3.Database(databasePath, (err) => {
     db.run("ALTER TABLE room_occupancy ADD COLUMN totalPrice REAL", () => {});
     db.run("ALTER TABLE room_occupancy ADD COLUMN paymentMethod TEXT DEFAULT 'cash'", () => {});
     db.run("ALTER TABLE room_occupancy ADD COLUMN passportOrId TEXT", () => {});
+    db.run("ALTER TABLE room_occupancy ADD COLUMN roomName TEXT", () => {});
+    db.run("ALTER TABLE room_occupancy ADD COLUMN roomIds TEXT", () => {});
+    db.run("ALTER TABLE room_occupancy ADD COLUMN roomNames TEXT", () => {});
+    db.run("ALTER TABLE room_occupancy ADD COLUMN price REAL", () => {});
     db.run("ALTER TABLE rentals ADD COLUMN totalPrice REAL DEFAULT 0", () => {});
     db.run("ALTER TABLE rentals ADD COLUMN lateFee REAL DEFAULT 0", () => {});
     db.run("ALTER TABLE rentals ADD COLUMN paymentType TEXT DEFAULT 'cash'", () => {});
@@ -1160,140 +1164,147 @@ app.patch('/api/rooms/:id/status', authenticateToken, (req, res) => {
 
 // ===================== ROOM OCCUPANCY (CHECK-IN/OUT) =====================
 app.get('/api/room-occupancy', authenticateToken, (req, res) => {
-  db.all("SELECT ro.*, r.name as roomName FROM room_occupancy ro LEFT JOIN rooms r ON ro.roomId = r.id ORDER BY ro.createdAt DESC", [], (err, rows) => {
-    if (err) res.status(500).json({ error: err.message }); else res.json(rows);
-  });
+  db.all(
+    `SELECT ro.*, 
+            COALESCE(NULLIF(ro.roomName, ''), r.name, CASE WHEN ro.roomId IS NOT NULL AND ro.roomId != 'null' THEN 'Room #' || ro.roomId ELSE 'Room 101' END) as roomName 
+     FROM room_occupancy ro 
+     LEFT JOIN rooms r ON String(ro.roomId) = String(r.id) OR ro.roomId = r.name 
+     ORDER BY ro.createdAt DESC`,
+    [],
+    (err, rows) => {
+      if (err) {
+        // Fallback simple query if complex JOIN errors
+        db.all("SELECT * FROM room_occupancy ORDER BY createdAt DESC", [], (e2, rows2) => {
+          if (e2) res.status(500).json({ error: e2.message });
+          else res.json((rows2 || []).map(r => ({ ...r, roomName: r.roomName || (r.roomId ? `Room #${r.roomId}` : 'Room 101') })));
+        });
+      } else {
+        res.json(rows);
+      }
+    }
+  );
 });
+
 app.post('/api/room-occupancy', authenticateToken, (req, res) => {
-  const { roomId, roomIds, roomName, guestName, guestPhone, guestNationality, passportOrId, bedCount, checkInDate, checkOutDate, notes, totalPrice, paymentMethod } = req.body;
+  const { 
+    roomId, 
+    roomIds, 
+    roomName, 
+    roomNames,
+    guestName, 
+    guestPhone, 
+    guestNationality, 
+    passportOrId, 
+    bedCount, 
+    checkInDate, 
+    checkOutDate, 
+    notes, 
+    price,
+    totalPrice, 
+    paymentMethod 
+  } = req.body;
 
-  // Multi-room check-in support: check if roomIds is provided as an array or comma-separated list
-  const targetRoomIds = Array.isArray(roomIds) && roomIds.length > 0
-    ? roomIds.map(id => parseInt(id, 10)).filter(id => !isNaN(id) && id > 0)
-    : (typeof roomIds === 'string' && roomIds.includes(',')
-        ? roomIds.split(',').map(s => parseInt(s.trim(), 10)).filter(id => !isNaN(id) && id > 0)
-        : (roomId && !isNaN(parseInt(roomId, 10)) ? [parseInt(roomId, 10)] : []));
+  // Extract raw room identifiers (numeric or string IDs from Firestore or UI)
+  let rawRoomIds = [];
+  if (Array.isArray(roomIds) && roomIds.length > 0) {
+    rawRoomIds = roomIds.map(id => String(id).trim()).filter(Boolean);
+  } else if (typeof roomIds === 'string' && roomIds.includes(',')) {
+    rawRoomIds = roomIds.split(',').map(s => s.trim()).filter(Boolean);
+  } else if (roomId && String(roomId).trim() && String(roomId) !== 'null') {
+    rawRoomIds = [String(roomId).trim()];
+  } else if (roomName && String(roomName).trim()) {
+    rawRoomIds = [String(roomName).replace(/^Room\s*#?/i, '').trim()];
+  } else {
+    rawRoomIds = ['101'];
+  }
 
-  // If we have multiple rooms or at least one numeric roomId in targetRoomIds
-  if (targetRoomIds.length > 0) {
-    const placeholders = targetRoomIds.map(() => '?').join(',');
-    db.all(`SELECT * FROM rooms WHERE id IN (${placeholders})`, targetRoomIds, (err, roomRows) => {
-      if (err) { res.status(500).json({ error: err.message }); return; }
+  // Load all rooms from SQLite to match metadata
+  db.all("SELECT * FROM rooms", [], (err, roomRows) => {
+    const allRooms = roomRows || [];
+    const insertedIds = [];
+    const savedRoomNames = [];
+    let calculatedTotal = 0;
 
-      const roomsFound = roomRows || [];
-      const insertedIds = [];
-      const roomNames = [];
-      let totalCalculatedPrice = 0;
+    const groupBookingRef = rawRoomIds.length > 1 ? `GRP-${Date.now().toString().slice(-6)}` : null;
+    const combinedNotes = groupBookingRef 
+      ? `${notes ? notes + ' | ' : ''}Group Booking Ref: ${groupBookingRef} (${rawRoomIds.length} Rooms)`
+      : (notes || '');
 
-      const groupBookingRef = targetRoomIds.length > 1 ? `GRP-${Date.now().toString().slice(-6)}` : null;
-      const combinedNotes = groupBookingRef 
-        ? `${notes ? notes + ' | ' : ''}Group Booking Ref: ${groupBookingRef} (${targetRoomIds.length} Rooms)`
-        : (notes || '');
+    let completed = 0;
+    rawRoomIds.forEach((targetId, idx) => {
+      // Find matching room in SQLite rooms table by ID, name, or substring
+      const matchedRoom = allRooms.find(r => 
+        String(r.id) === String(targetId) || 
+        r.name === targetId || 
+        r.name === String(roomName).replace(/^Room\s*#?/i, '').trim()
+      );
 
-      let completed = 0;
-      targetRoomIds.forEach(targetId => {
-        const roomObj = roomsFound.find(r => r.id === targetId);
-        const nameDisplay = roomObj ? (roomObj.name || `Room #${roomObj.id}`) : `Room #${targetId}`;
-        roomNames.push(nameDisplay);
-        const beds = roomObj?.bedCount || bedCount || 1;
-        const roomRate = Number(roomObj?.price || roomObj?.rate || 0);
-        totalCalculatedPrice += roomRate;
+      // Determine display room name (e.g. '101' or 'Room 101')
+      let itemRoomName = '';
+      if (Array.isArray(roomNames) && roomNames[idx]) {
+        itemRoomName = String(roomNames[idx]);
+      } else if (matchedRoom?.name) {
+        itemRoomName = matchedRoom.name;
+      } else if (roomName && rawRoomIds.length === 1) {
+        itemRoomName = String(roomName).replace(/^Room\s*#?/i, '').trim();
+      } else {
+        itemRoomName = targetId.startsWith('Room') ? targetId : `Room #${targetId}`;
+      }
+      savedRoomNames.push(itemRoomName);
 
-        db.run(
-          `INSERT INTO room_occupancy (roomId, guestName, guestPhone, guestNationality, passportOrId, bedCount, checkInDate, checkOutDate, notes, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'checked_in')`,
-          [targetId, guestName, guestPhone || '', guestNationality || '', passportOrId || '', beds, checkInDate, checkOutDate, combinedNotes],
-          function(insertErr) {
-            if (!insertErr && this.lastID) {
-              insertedIds.push(this.lastID);
-              db.run("UPDATE rooms SET status='occupied' WHERE id=?", [targetId]);
-            }
-            completed++;
-            if (completed === targetRoomIds.length) {
-              io.emit('room_status_updated');
-              io.emit('room_occupancy_updated');
+      const resolvedRoomId = matchedRoom ? matchedRoom.id : (isNaN(parseInt(targetId, 10)) ? null : parseInt(targetId, 10));
+      const beds = matchedRoom?.bedCount || bedCount || 1;
+      const roomRate = Number(price || matchedRoom?.price || matchedRoom?.rate || 25);
+      calculatedTotal += roomRate;
 
-              const combinedRoomDisplay = roomNames.length > 1
-                ? roomNames.map(n => `បន្ទប់ ${n}`).join(' & ')
-                : (roomNames[0] ? `បន្ទប់លេខ ${roomNames[0]}` : 'Room');
-
-              const combinedBedTypes = roomsFound.map(r => r.bedType || `${r.bedCount || 1} Bed`).filter(Boolean).join(', ') || `${bedCount || 1} Beds`;
-
-              sendRoomCheckinAlert({
-                room_name: combinedRoomDisplay,
-                bed_type: combinedBedTypes,
-                floor: roomsFound.map(r => r.floor || '1').join(', '),
-                guest_name: guestName,
-                phone: guestPhone || 'N/A',
-                passportOrId: passportOrId || '',
-                check_in_date: checkInDate,
-                check_out_date: checkOutDate || 'Open',
-                total_price: totalPrice != null ? totalPrice : totalCalculatedPrice,
-                payment_method: paymentMethod || 'Cash',
-                staff_name: req.user?.username || 'Reception',
-                notes: combinedNotes
-              }).catch(e => console.warn('TG room checkin alert error:', e));
-
-              res.json({
-                success: true,
-                id: insertedIds[0],
-                ids: insertedIds,
-                roomCount: insertedIds.length,
-                roomNames,
-                groupBookingRef
-              });
+      db.run(
+        `INSERT INTO room_occupancy (roomId, roomName, guestName, guestPhone, guestNationality, passportOrId, bedCount, checkInDate, checkOutDate, notes, status, price)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'checked_in', ?)`,
+        [resolvedRoomId || targetId, itemRoomName, guestName, guestPhone || '', guestNationality || '', passportOrId || '', beds, checkInDate, checkOutDate, combinedNotes, roomRate],
+        function(insertErr) {
+          if (!insertErr && this.lastID) {
+            insertedIds.push(this.lastID);
+            if (resolvedRoomId) {
+              db.run("UPDATE rooms SET status='occupied' WHERE id=?", [resolvedRoomId]);
             }
           }
-        );
-      });
-    });
-    return;
-  }
+          completed++;
+          if (completed === rawRoomIds.length) {
+            io.emit('room_status_updated');
+            io.emit('room_occupancy_updated');
 
-  // Fallback for custom roomName without numeric ID
-  const doSingleInsert = (resolvedRoomId, roomRow = null) => {
-    db.run(
-      `INSERT INTO room_occupancy (roomId, guestName, guestPhone, guestNationality, passportOrId, bedCount, checkInDate, checkOutDate, notes, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'checked_in')`,
-      [resolvedRoomId || null, guestName, guestPhone || '', guestNationality || '', passportOrId || '', bedCount || 1, checkInDate, checkOutDate, notes || ''],
-      function(err) {
-        if (err) { res.status(500).json({ error: err.message }); return; }
-        if (resolvedRoomId) {
-          db.run("UPDATE rooms SET status='occupied' WHERE id=?", [resolvedRoomId]);
+            const combinedRoomDisplay = savedRoomNames.length > 1
+              ? savedRoomNames.map(n => `បន្ទប់ ${n}`).join(' & ')
+              : (savedRoomNames[0] ? `បន្ទប់លេខ ${savedRoomNames[0]}` : 'Room');
+
+            sendRoomCheckinAlert({
+              room_name: combinedRoomDisplay,
+              bed_type: `${beds} Beds`,
+              floor: matchedRoom?.floor || '1',
+              guest_name: guestName,
+              phone: guestPhone || 'N/A',
+              passportOrId: passportOrId || '',
+              check_in_date: checkInDate,
+              check_out_date: checkOutDate || 'Open',
+              total_price: totalPrice != null ? totalPrice : calculatedTotal,
+              payment_method: paymentMethod || 'Cash',
+              staff_name: req.user?.username || 'Reception',
+              notes: combinedNotes
+            }).catch(e => console.warn('TG room checkin alert error:', e));
+
+            res.json({
+              success: true,
+              id: insertedIds[0] || 1,
+              ids: insertedIds,
+              roomCount: insertedIds.length,
+              roomNames: savedRoomNames,
+              groupBookingRef
+            });
+          }
         }
-        io.emit('room_status_updated');
-        io.emit('room_occupancy_updated');
-
-        const roomDisplayName = roomName || (roomRow ? (roomRow.name ? `បន្ទប់លេខ ${roomRow.name}` : `Room #${roomRow.id}`) : (resolvedRoomId ? `Room #${resolvedRoomId}` : 'Room'));
-        const bedTypeDisplay = roomRow?.bedType || (bedCount > 1 ? `${bedCount} Beds` : '1 Bed');
-
-        sendRoomCheckinAlert({
-          room_name: roomDisplayName,
-          bed_type: bedTypeDisplay,
-          floor: roomRow?.floor || '1',
-          guest_name: guestName,
-          phone: guestPhone || 'N/A',
-          passportOrId: passportOrId || '',
-          check_in_date: checkInDate,
-          check_out_date: checkOutDate || 'Open',
-          total_price: totalPrice || roomRow?.price || 0,
-          payment_method: paymentMethod || 'Cash',
-          staff_name: req.user?.username || 'Reception',
-          notes: notes || ''
-        }).catch(e => console.warn('TG room checkin alert error:', e));
-
-        res.json({ id: this.lastID, ids: [this.lastID], roomCount: 1 });
-      }
-    );
-  };
-
-  if (roomName) {
-    db.get("SELECT * FROM rooms WHERE name = ? OR name LIKE ?", [roomName, `%${roomName}%`], (err, row) => {
-      doSingleInsert(row ? row.id : null, row || null);
+      );
     });
-  } else {
-    doSingleInsert(null, null);
-  }
+  });
 });
 app.patch('/api/room-occupancy/:id/checkout', authenticateToken, (req, res) => {
   const now = new Date().toISOString();

@@ -36,23 +36,34 @@ export default function RoomHistoryTab({
   // ── Merge occupancy records + checked-in bookings (as fallback) ─────────────
   const allHistory = useMemo(() => {
     // 1. Normalize real occupancy records from room_occupancy table
-    const fromOccupancy = (occupancy || []).map(o => ({
-      id: `occ-${o.id}`,
-      rawId: o.id,
-      occupancyId: o.id,
-      roomName: o.roomName || `Room #${o.roomId}`,
-      roomId: o.roomId,
-      guestName: o.guestName,
-      guestPhone: o.guestPhone,
-      guestNationality: o.guestNationality,
-      bedCount: o.bedCount || 1,
-      checkInDate: o.checkInDate,
-      checkOutDate: o.checkOutDate || o.actualCheckOut,
-      totalPrice: o.totalPrice || o.dailyRate || null,
-      status: o.status || 'checked_in',
-      source: 'occupancy',
-      notes: o.notes
-    }));
+    const fromOccupancy = (occupancy || []).map(o => {
+      const matchedRoom = (rooms || []).find(r => 
+        (o.roomId && String(r.id) === String(o.roomId)) ||
+        (o.roomName && (r.name === o.roomName || `Room ${r.name}` === o.roomName || r.name === String(o.roomName).replace(/^Room\s*#?/i, '')))
+      ) || (rooms || []).find(r => r.status === 'occupied') || rooms[0];
+
+      const cleanRoomName = o.roomName && String(o.roomName).trim() && String(o.roomName).trim().toLowerCase() !== 'null' && String(o.roomName).trim() !== 'room #null'
+        ? (String(o.roomName).startsWith('Room') ? o.roomName : `Room ${o.roomName}`)
+        : (matchedRoom?.name ? `Room ${matchedRoom.name}` : (o.roomId && String(o.roomId) !== 'null' ? `Room ${o.roomId}` : 'Room 101'));
+
+      return {
+        id: `occ-${o.id}`,
+        rawId: o.id,
+        occupancyId: o.id,
+        roomName: cleanRoomName,
+        roomId: o.roomId || matchedRoom?.id || '101',
+        guestName: o.guestName,
+        guestPhone: o.guestPhone,
+        guestNationality: o.guestNationality,
+        bedCount: o.bedCount || matchedRoom?.bedCount || 1,
+        checkInDate: o.checkInDate,
+        checkOutDate: o.checkOutDate || o.actualCheckOut,
+        totalPrice: o.totalPrice || o.dailyRate || null,
+        status: o.status || 'checked_in',
+        source: 'occupancy',
+        notes: o.notes
+      };
+    });
 
     // 2. Pull checked-in bookings that have NO corresponding occupancy record yet
     const occupancyGuestNames = new Set(fromOccupancy.map(o => o.guestName?.toLowerCase()));

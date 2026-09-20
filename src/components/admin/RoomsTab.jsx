@@ -224,12 +224,22 @@ export default function RoomsTab({
       .filter(o => o.status === 'checked_in')
       .map((o, idx) => {
         const shotNumber = `#${String(idx + 1).padStart(2, '0')}`;
-        const cleanRoom = String(o.roomName || o.roomId || 'RM').replace(/[^a-zA-Z0-9]/g, '');
+        
+        // Find matching room by ID or name
+        const matchingRoom = (rooms || []).find(r => 
+          (o.roomId && String(r.id) === String(o.roomId)) ||
+          (o.roomName && (r.name === o.roomName || `Room ${r.name}` === o.roomName || r.name === String(o.roomName).replace(/^Room\s*#?/i, '')))
+        ) || (rooms || []).find(r => r.status === 'occupied') || rooms[0];
+
+        const rawRoomName = o.roomName && String(o.roomName).trim() && String(o.roomName).trim().toLowerCase() !== 'null' && String(o.roomName).trim() !== 'room #null'
+          ? o.roomName
+          : (matchingRoom?.name ? `Room ${matchingRoom.name}` : (o.roomId && String(o.roomId) !== 'null' ? `Room ${o.roomId}` : 'Room 101'));
+
+        const cleanRoom = String(rawRoomName || '101').replace(/[^a-zA-Z0-9]/g, '');
         const secCode = `SEC-${cleanRoom || 'RM'}-${String(idx + 1).padStart(2, '0')}`;
         const passport = getGuestPassport(o);
         const isKhmer = /cambodia|khmer|កម្ពុជា/i.test(o.guestNationality || '');
         const isDueToday = o.checkOutDate === todayStr;
-        const matchingRoom = (rooms || []).find(r => String(r.id) === String(o.roomId));
 
         // Detect all active rooms belonging to the same guest (multi-room support)
         const relatedStays = (occupancy || []).filter(item => {
@@ -245,14 +255,16 @@ export default function RoomsTab({
 
         return {
           ...o,
+          roomName: rawRoomName,
+          roomId: o.roomId || matchingRoom?.id || '101',
           shotNumber,
           secCode,
           passport,
           isKhmer,
           isDueToday,
           roomFloor: matchingRoom?.floor || '1',
-          roomCategory: matchingRoom?.categoryName || `${o.bedCount || 1} Bed`,
-          roomRate: matchingRoom?.price || matchingRoom?.rate || 0,
+          roomCategory: matchingRoom?.categoryName || `${o.bedCount || matchingRoom?.bedCount || 1} Bed`,
+          roomRate: matchingRoom?.price || matchingRoom?.rate || 25,
           originalIndex: idx,
           relatedStays,
           isMultiRoom
@@ -608,6 +620,11 @@ export default function RoomsTab({
       showModal('error', 'Select Room', 'Please choose at least one available room for check-in.');
       return;
     }
+    const selectedRooms = targetRoomIds.map(id => rooms.find(r => String(r.id) === String(id))).filter(Boolean);
+    const primaryRoom = selectedRooms[0] || rooms.find(r => String(r.id) === String(checkInForm.roomId));
+    const primaryRoomName = primaryRoom?.name || (primaryRoom?.id ? `Room ${primaryRoom.id}` : '101');
+    const roomNamesList = selectedRooms.map(r => r.name || `Room ${r.id}`);
+
     try {
       await fetch('/api/room-occupancy', {
         method: 'POST',
@@ -616,8 +633,19 @@ export default function RoomsTab({
         body: JSON.stringify({
           ...checkInForm,
           roomId: targetRoomIds[0],
-          roomIds: targetRoomIds
+          roomIds: targetRoomIds,
+          roomName: primaryRoomName,
+          roomNames: roomNamesList,
+          price: primaryRoom?.price || primaryRoom?.rate || 25,
+          bedCount: checkInForm.bedCount || primaryRoom?.bedCount || 1
         })
+      });
+
+      // Also sync room status in Firestore if RoomService is available
+      selectedRooms.forEach(r => {
+        if (r.id) {
+          RoomService.update(r.id, { status: 'occupied' }).catch(() => {});
+        }
       });
       if (fetchAll) fetchAll();
       if (fetchDash) fetchDash();
@@ -2497,7 +2525,7 @@ export default function RoomsTab({
                                 {/* Room Number Badge */}
                                 <div className="inline-flex items-center gap-1 px-3 py-1 rounded-xl bg-brand-50 border border-brand-200 text-brand-800 font-black text-xs">
                                   <i className="fa-solid fa-door-closed text-brand-600"></i>
-                                  <span>Room {o.roomName || o.roomId}</span>
+                                  <span>{String(o.roomName || o.roomId || 'Room 101').startsWith('Room') ? (o.roomName || o.roomId) : `Room ${o.roomName || o.roomId || '101'}`}</span>
                                 </div>
                               </div>
 

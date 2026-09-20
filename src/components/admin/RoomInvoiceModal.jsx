@@ -7,9 +7,10 @@ export default function RoomInvoiceModal({
   relatedOccupancies = [],
   rooms = [],
   settings = {},
-  currency = (v) => `$${Number(v || 0).toFixed(2)}`
+  currency: rawCurrency
 }) {
   const printRef = useRef(null);
+  const currency = typeof rawCurrency === 'function' ? rawCurrency : (v) => `$${Number(v || 0).toFixed(2)}`;
 
   const bProfile = settings.business_profile || {};
   const invSettings = settings.invoice_settings || {};
@@ -76,13 +77,28 @@ export default function RoomInvoiceModal({
     items = primaryStay.customItems;
     subtotal = items.reduce((sum, item) => sum + Number(item.total || 0), 0);
   } else {
-    items = allStays.map((stay) => {
-      const roomObj = rooms.find(r => String(r.id) === String(stay.roomId)) || {};
-      const rate = Number(stay.price || roomObj.price || roomObj.rate || 25);
+    items = allStays.filter(Boolean).map((stay) => {
+      const roomObj = rooms.find(r => 
+        (stay.roomId && String(r.id) === String(stay.roomId)) ||
+        (stay.roomName && (r.name === stay.roomName || `Room ${r.name}` === stay.roomName || r.name === String(stay.roomName).replace(/^Room\s*#?/i, '')))
+      ) || (rooms || []).find(r => r.status === 'occupied') || rooms[0] || {};
+
+      const rawRate = Number(stay.price || stay.roomRate || roomObj.price || roomObj.rate || 25);
+      const rate = isNaN(rawRate) || rawRate <= 0 ? 25 : rawRate;
       const total = rate * nights;
+
+      let cleanRoomName = 'Room 101';
+      if (stay.roomName && String(stay.roomName).trim() && String(stay.roomName).trim().toLowerCase() !== 'null' && String(stay.roomName).trim() !== 'room #null') {
+        cleanRoomName = String(stay.roomName).startsWith('Room') ? stay.roomName : `Room ${stay.roomName}`;
+      } else if (roomObj.name) {
+        cleanRoomName = `Room ${roomObj.name}`;
+      } else if (stay.roomId && String(stay.roomId) !== 'null') {
+        cleanRoomName = String(stay.roomId).startsWith('Room') ? stay.roomId : `Room ${stay.roomId}`;
+      }
+
       return {
-        id: stay.id,
-        roomName: stay.roomName || roomObj.name || `Room #${stay.roomId}`,
+        id: stay.id || Math.random(),
+        roomName: cleanRoomName,
         bedType: roomObj.bedType || `${stay.bedCount || roomObj.bedCount || 1} Bed`,
         floor: roomObj.floor || '1',
         rate,
@@ -245,7 +261,7 @@ export default function RoomInvoiceModal({
       {/* Container */}
       <div 
         onClick={(e) => e.stopPropagation()}
-        className={`bg-white rounded-3xl shadow-2xl border border-stone-200 overflow-hidden modal-pop my-auto printable-invoice-container print:shadow-none print:border-none print:rounded-none relative z-10 ${
+        className={`bg-white rounded-3xl shadow-2xl border border-stone-200 overflow-hidden modal-pop my-auto max-h-[92vh] flex flex-col printable-invoice-container print:shadow-none print:border-none print:rounded-none relative z-10 opacity-100 ${
           isPos ? posWidthClass : 'w-full max-w-3xl'
         }`}
       >
@@ -325,7 +341,7 @@ export default function RoomInvoiceModal({
         </div>
 
         {/* Printable Area (Targeted for isolated printing) */}
-        <div ref={printRef} id="invoice-printable-content" className="bg-white">
+        <div ref={printRef} id="invoice-printable-content" className="bg-white overflow-y-auto flex-1">
           {/* ═══════════════════════════════════════════════════════════════ */}
           {/* VIEW 1: STANDARD A4 OFFICIAL FOLIO                             */}
           {/* ═══════════════════════════════════════════════════════════════ */}
