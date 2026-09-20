@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useModal } from '../common/ModalProvider';
 import { RoomService, BedCategoryService, OccupancyService } from '../../services/DatabaseService';
 import { fileToBase64 } from '../../utils/imageUtils';
@@ -70,6 +70,7 @@ const DEFAULT_CATEGORIES = [
 ];
 
 export default function RoomsTab({
+  initialSubSection = 'rooms',
   rooms = [],
   bedCategories = [],
   occupancy = [],
@@ -101,7 +102,7 @@ export default function RoomsTab({
       const vacantCount = rooms.filter(r => r.status === 'vacant').length;
       const occupiedCount = rooms.filter(r => r.status === 'occupied').length;
       const cleaningCount = rooms.filter(r => r.status === 'cleaning').length;
-      const activeOcc = (occupancy || []).filter(o => o.status === 'checked_in').length;
+      const activeOcc = (occupancy || []).filter(o => o.status === 'checked_in' || o.status === 'active' || o.status === 'occupied').length;
 
       if (sendCategoryTelegramAlert) {
         await sendCategoryTelegramAlert({
@@ -134,8 +135,14 @@ export default function RoomsTab({
     }
   };
 
-  // Sub-navigation: 'occupancy' | 'categories' | 'rooms'
-  const [subSection, setSubSection] = useState('rooms');
+  // Sub-navigation: 'rooms' | 'checkout' | 'occupancy' | 'categories' | 'bookings'
+  const [subSection, setSubSection] = useState(initialSubSection || 'rooms');
+
+  useEffect(() => {
+    if (initialSubSection) {
+      setSubSection(initialSubSection);
+    }
+  }, [initialSubSection]);
 
   // Filter & Search states for rooms
   const [roomSearch, setRoomSearch] = useState('');
@@ -221,7 +228,7 @@ export default function RoomsTab({
   const activeOccupancyWithShot = useMemo(() => {
     const todayStr = today ? today() : new Date().toISOString().split('T')[0];
     return (occupancy || [])
-      .filter(o => o.status === 'checked_in')
+      .filter(o => o.status === 'checked_in' || o.status === 'active' || o.status === 'occupied')
       .map((o, idx) => {
         const shotNumber = `#${String(idx + 1).padStart(2, '0')}`;
         
@@ -243,7 +250,7 @@ export default function RoomsTab({
 
         // Detect all active rooms belonging to the same guest (multi-room support)
         const relatedStays = (occupancy || []).filter(item => {
-          if (item.status !== 'checked_in') return false;
+          if (item.status !== 'checked_in' && item.status !== 'active' && item.status !== 'occupied') return false;
           if (item.id === o.id) return true;
           const itemPass = getGuestPassport(item);
           if (passport && itemPass && String(itemPass).trim().toLowerCase() === String(passport).trim().toLowerCase()) return true;
@@ -419,7 +426,7 @@ export default function RoomsTab({
   });
 
   const activeOccupancy = useMemo(() => {
-    return (occupancy || []).filter(o => o.status === 'checked_in');
+    return (occupancy || []).filter(o => o.status === 'checked_in' || o.status === 'active' || o.status === 'occupied');
   }, [occupancy]);
 
   const statusColors = {
@@ -634,7 +641,7 @@ export default function RoomsTab({
         roomNames: roomNamesList,
         price: primaryRoom?.price || primaryRoom?.rate || 25,
         bedCount: checkInForm.bedCount || primaryRoom?.bedCount || 1,
-        status: 'active',
+        status: 'checked_in',
         createdAt: Date.now()
       };
       // Write to Firebase (shared cloud) first
@@ -1710,7 +1717,10 @@ export default function RoomsTab({
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {filteredRooms.map(room => {
-                    const occ = activeOccupancy.find(o => String(o.roomId) === String(room.id));
+                    const occ = activeOccupancy.find(o =>
+                      (o.roomId && String(o.roomId) === String(room.id)) ||
+                      (o.roomName && (room.name === o.roomName || `Room ${room.name}` === o.roomName || room.name === String(o.roomName).replace(/^Room\s*#?/i, '')))
+                    );
                     const roomImgs = Array.isArray(room.images) && room.images.length > 0
                       ? room.images
                       : (room.imageUrl ? [room.imageUrl] : ['https://images.unsplash.com/photo-1590490360182-c33d57733427?w=500&q=80']);
@@ -1753,17 +1763,49 @@ export default function RoomsTab({
                               </div>
                             </div>
 
-                            {/* Occupant Note */}
+                            {/* Occupant Note & Quick Checkout Button */}
                             {occ ? (
-                              <div className="p-2 bg-blue-50/80 rounded-xl border border-blue-100 text-xs text-blue-900">
+                              <div className="p-2.5 bg-blue-50/90 rounded-xl border border-blue-200 text-xs text-blue-900 space-y-1.5">
                                 <div className="font-bold flex items-center justify-between">
-                                  <span className="truncate">{occ.guestName}</span>
-                                  <span className="text-[10px] bg-blue-200/70 text-blue-800 px-1.5 py-0.2 rounded font-mono">In</span>
+                                  <span className="truncate flex items-center gap-1.5">
+                                    <i className="fa-solid fa-user text-blue-600"></i>
+                                    <span>{occ.guestName}</span>
+                                  </span>
+                                  <span className="text-[10px] bg-blue-200/80 text-blue-900 px-1.5 py-0.2 rounded font-mono font-bold">In-House</span>
                                 </div>
-                                <div className="text-[11px] text-blue-600 mt-0.5 flex items-center justify-between">
-                                  <span>Out: {occ.checkOutDate}</span>
+                                <div className="text-[11px] text-blue-700 flex items-center justify-between">
+                                  <span>Out: {occ.checkOutDate || 'Open'}</span>
                                   <span>{occ.guestPhone || ''}</span>
                                 </div>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleCheckOut(occ);
+                                  }}
+                                  className="w-full mt-1 py-1.5 px-2 bg-amber-500 hover:bg-amber-600 active:scale-98 text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 shadow-2xs transition cursor-pointer"
+                                >
+                                  <i className="fa-solid fa-right-from-bracket text-[11px]"></i>
+                                  <span>Check Out (ចេញបន្ទប់)</span>
+                                </button>
+                              </div>
+                            ) : room.status === 'occupied' ? (
+                              <div className="p-2.5 bg-blue-50/90 rounded-xl border border-blue-200 text-xs text-blue-900 space-y-1.5">
+                                <div className="font-bold flex items-center justify-between text-blue-950">
+                                  <span>Room Marked Occupied</span>
+                                  <span className="text-[10px] bg-blue-200/80 text-blue-900 px-1.5 py-0.2 rounded font-mono font-bold">Occupied</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleCheckOut({ roomId: room.id, roomName: room.name, price: room.price || room.rate || 25 });
+                                  }}
+                                  className="w-full mt-1 py-1.5 px-2 bg-amber-500 hover:bg-amber-600 active:scale-98 text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 shadow-2xs transition cursor-pointer"
+                                >
+                                  <i className="fa-solid fa-right-from-bracket text-[11px]"></i>
+                                  <span>Check Out (ចេញបន្ទប់)</span>
+                                </button>
                               </div>
                             ) : (
                               <div className="p-2 bg-stone-50 rounded-xl border border-stone-100 text-[11px] text-stone-500 flex items-center justify-between">
@@ -2260,7 +2302,10 @@ export default function RoomsTab({
                     {/* Room Grid for this Floor */}
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                       {floorData.rooms.map(room => {
-                        const occ = activeOccupancy.find(o => String(o.roomId) === String(room.id));
+                        const occ = activeOccupancy.find(o =>
+                          (o.roomId && String(o.roomId) === String(room.id)) ||
+                          (o.roomName && (room.name === o.roomName || `Room ${room.name}` === o.roomName || room.name === String(o.roomName).replace(/^Room\s*#?/i, '')))
+                        );
                         return (
                           <div
                             key={room.id}
@@ -2293,17 +2338,47 @@ export default function RoomsTab({
                               </div>
 
                               {/* In-House Guest Details if Occupied */}
-                              {occ && (
+                              {occ ? (
                                 <div className="pt-2 border-t border-blue-200/80 bg-blue-100/50 -mx-3.5 px-3.5 pb-1 text-xs">
                                   <p className="font-bold truncate text-blue-950 flex items-center gap-1">
                                     <i className="fa-solid fa-user text-[10px] text-blue-600"></i>
                                     <span>{occ.guestName}</span>
                                   </p>
-                                  <p className="text-[10px] text-blue-800 font-medium mt-0.5">
-                                    Out: {occ.checkOutDate || 'Open'}
-                                  </p>
+                                  <div className="flex items-center justify-between mt-1">
+                                    <span className="text-[10px] text-blue-800 font-medium">Out: {occ.checkOutDate || 'Open'}</span>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleCheckOut(occ);
+                                      }}
+                                      className="px-2 py-0.5 bg-amber-500 hover:bg-amber-600 active:scale-98 text-white rounded text-[10px] font-bold shadow-2xs transition cursor-pointer flex items-center gap-1"
+                                      title="Check Out Guest"
+                                    >
+                                      <i className="fa-solid fa-right-from-bracket text-[9px]"></i>
+                                      <span>Check Out</span>
+                                    </button>
+                                  </div>
                                 </div>
-                              )}
+                              ) : room.status === 'occupied' ? (
+                                <div className="pt-2 border-t border-blue-200/80 bg-blue-100/50 -mx-3.5 px-3.5 pb-1 text-xs">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[10px] text-blue-900 font-bold">Occupied</span>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleCheckOut({ roomId: room.id, roomName: room.name, price: room.price || room.rate || 25 });
+                                      }}
+                                      className="px-2 py-0.5 bg-amber-500 hover:bg-amber-600 active:scale-98 text-white rounded text-[10px] font-bold shadow-2xs transition cursor-pointer flex items-center gap-1"
+                                      title="Check Out Guest"
+                                    >
+                                      <i className="fa-solid fa-right-from-bracket text-[9px]"></i>
+                                      <span>Check Out</span>
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : null}
                             </div>
 
                             {/* Quick Status Buttons with Dedicated Colors */}
@@ -2651,7 +2726,8 @@ export default function RoomsTab({
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <button
                                 type="button"
-                                onClick={() => {
+                                onClick={(e) => {
+                                  e.stopPropagation();
                                   setInvoiceModalGuest(o);
                                   setInvoiceModalRelated(o.relatedStays || [o]);
                                 }}
@@ -2852,7 +2928,8 @@ export default function RoomsTab({
                             <div className="flex items-center justify-end gap-1.5">
                               <button
                                 type="button"
-                                onClick={() => {
+                                onClick={(e) => {
+                                  e.stopPropagation();
                                   setInvoiceModalGuest(o);
                                   setInvoiceModalRelated(o.relatedStays || [o]);
                                 }}
@@ -3263,7 +3340,10 @@ export default function RoomsTab({
 
                   {/* Active Occupancy Card */}
                   {(() => {
-                    const activeStay = activeOccupancy.find(o => String(o.roomId) === String(selectedRoom.id));
+                    const activeStay = activeOccupancy.find(o =>
+                      (o.roomId && String(o.roomId) === String(selectedRoom.id)) ||
+                      (o.roomName && (selectedRoom.name === o.roomName || `Room ${selectedRoom.name}` === o.roomName || selectedRoom.name === String(o.roomName).replace(/^Room\s*#?/i, '')))
+                    );
                     if (activeStay) {
                       return (
                         <div className="p-5 bg-blue-50 rounded-2xl border border-blue-200 space-y-3">
@@ -3274,10 +3354,11 @@ export default function RoomsTab({
                             </h4>
                             <button
                               type="button"
-                              onClick={() => handleCheckOut(activeStay.id, activeStay.guestName)}
-                              className="px-3 py-1.5 bg-amber-500 text-white text-xs font-bold rounded-xl hover:bg-amber-600 shadow-sm transition-colors"
+                              onClick={() => handleCheckOut(activeStay)}
+                              className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl shadow-sm transition-colors cursor-pointer flex items-center gap-1.5"
                             >
-                              <i className="fa-solid fa-right-from-bracket mr-1"></i> Check Out
+                              <i className="fa-solid fa-right-from-bracket"></i>
+                              <span>Check Out (ចេញបន្ទប់)</span>
                             </button>
                           </div>
                           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
@@ -3303,6 +3384,26 @@ export default function RoomsTab({
                               <span className="font-bold">Notes:</span> {activeStay.notes}
                             </p>
                           )}
+                        </div>
+                      );
+                    } else if (selectedRoom.status === 'occupied') {
+                      return (
+                        <div className="p-5 bg-blue-50 rounded-2xl border border-blue-200 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <h4 className="font-bold text-blue-900 text-sm flex items-center gap-2">
+                              <i className="fa-solid fa-user-check text-blue-600"></i>
+                              <span>Current Occupant Status: Occupied</span>
+                            </h4>
+                            <button
+                              type="button"
+                              onClick={() => handleCheckOut({ roomId: selectedRoom.id, roomName: selectedRoom.name, price: selectedRoom.price || selectedRoom.rate || 25 })}
+                              className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl shadow-sm transition-colors cursor-pointer flex items-center gap-1.5"
+                            >
+                              <i className="fa-solid fa-right-from-bracket"></i>
+                              <span>Check Out (ចេញបន្ទប់)</span>
+                            </button>
+                          </div>
+                          <p className="text-xs text-blue-700">Click Check Out to calculate folio, clear room status, and transition room to cleaning.</p>
                         </div>
                       );
                     } else if (selectedRoom.status === 'vacant') {

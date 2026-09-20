@@ -46,6 +46,11 @@ export default function RoomHistoryTab({
         ? (String(o.roomName).startsWith('Room') ? o.roomName : `Room ${o.roomName}`)
         : (matchedRoom?.name ? `Room ${matchedRoom.name}` : (o.roomId && String(o.roomId) !== 'null' ? `Room ${o.roomId}` : 'Room 101'));
 
+      const rawStatus = String(o.status || '').toLowerCase().trim();
+      const isCheckedOut = rawStatus === 'checked_out' || rawStatus === 'completed' || rawStatus === 'returned' || !!o.checkOutActual;
+      const isCheckedIn = !isCheckedOut && (rawStatus === 'checked_in' || rawStatus === 'active' || rawStatus === 'occupied' || !rawStatus);
+      const normalizedStatus = isCheckedIn ? 'checked_in' : 'checked_out';
+
       return {
         id: `occ-${o.id}`,
         rawId: o.id,
@@ -59,7 +64,7 @@ export default function RoomHistoryTab({
         checkInDate: o.checkInDate,
         checkOutDate: o.checkOutDate || o.actualCheckOut,
         totalPrice: o.totalPrice || o.dailyRate || null,
-        status: o.status || 'checked_in',
+        status: normalizedStatus,
         source: 'occupancy',
         notes: o.notes
       };
@@ -166,6 +171,11 @@ export default function RoomHistoryTab({
     );
     if (!confirmed) return;
     try {
+      // Optimistic state update in real time
+      if (setOccupancy) {
+        setOccupancy(prev => (prev || []).map(o => String(o.id) === String(record.occupancyId) ? { ...o, status: 'checked_out', actualCheckOut: new Date().toISOString().split('T')[0] } : o));
+      }
+
       // Write to Firebase (shared cloud) first
       await OccupancyService.update(record.occupancyId, {
         status: 'checked_out',
@@ -497,11 +507,17 @@ export default function RoomHistoryTab({
                     {o.totalPrice ? `$${parseFloat(o.totalPrice).toFixed(2)}` : '—'}
                   </td>
                   <td className="p-4">
-                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                      o.status === 'checked_in' ? 'bg-emerald-100 text-emerald-800' : 'bg-stone-100 text-stone-600'
-                    }`}>
-                      {o.status === 'checked_in' ? 'Checked In' : 'Checked Out'}
-                    </span>
+                    {o.status === 'checked_in' ? (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                        <span>Checked In</span>
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-stone-100 text-stone-600 border border-stone-200">
+                        <i className="fa-solid fa-check text-[9px] text-stone-400"></i>
+                        <span>Checked Out</span>
+                      </span>
+                    )}
                   </td>
                   <td className="p-4 text-center">
                     <div className="flex items-center justify-center gap-1.5">

@@ -27,8 +27,6 @@ export default function RoomInvoiceModal({
     }
   }, [invSettings.paperSize]);
 
-  if (!isOpen || !occupancy) return null;
-
   const hotelName = invSettings.companyHeader || bProfile.hotelName || shopSet.shopName || 'Siem Reap Angkor Guesthouse';
   const hotelSubtitle = invSettings.subtitle || bProfile.slogan || 'Near Angkor Wat Temple Heritage Area';
   const hotelPhone = invSettings.phone || bProfile.phone || '+855 016 308 199';
@@ -49,9 +47,9 @@ export default function RoomInvoiceModal({
   // Determine all rooms for this guest (multi-room support)
   const allStays = relatedOccupancies && relatedOccupancies.length > 0
     ? relatedOccupancies
-    : [occupancy];
+    : (occupancy ? [occupancy] : []);
 
-  const primaryStay = occupancy;
+  const primaryStay = occupancy || {};
   const guestName = primaryStay.guestName || 'Guest';
   const guestPhone = primaryStay.guestPhone || 'N/A';
   const guestNationality = primaryStay.guestNationality || 'Cambodia';
@@ -112,6 +110,12 @@ export default function RoomInvoiceModal({
   const formatSafeDate = (val) => {
     if (!val) return new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
     try {
+      if (val && typeof val.toDate === 'function') {
+        return val.toDate().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+      }
+      if (val && typeof val.seconds === 'number') {
+        return new Date(val.seconds * 1000).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+      }
       const d = new Date(val);
       if (isNaN(d.getTime())) return String(val);
       return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -228,6 +232,8 @@ export default function RoomInvoiceModal({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, paperFormat, occupancy, relatedOccupancies]);
+
+  if (!isOpen || !occupancy) return null;
 
   return (
     <div 

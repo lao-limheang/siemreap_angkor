@@ -50,13 +50,16 @@ export default function RoomCheckoutModal({
   // Calculate room charges
   const roomLineItems = useMemo(() => {
     return targetStays.map(stay => {
-      const roomObj = rooms.find(r => String(r.id) === String(stay.roomId)) || {};
+      const roomObj = rooms.find(r =>
+        (stay.roomId && String(r.id) === String(stay.roomId)) ||
+        (stay.roomName && (r.name === stay.roomName || `Room ${r.name}` === stay.roomName || r.name === String(stay.roomName).replace(/^Room\s*#?/i, '')))
+      ) || {};
       const rate = Number(stay.price || roomObj.price || roomObj.rate || 25);
       const total = rate * nights;
       return {
         id: stay.id,
-        roomId: stay.roomId,
-        roomName: stay.roomName || roomObj.name || `Room #${stay.roomId}`,
+        roomId: stay.roomId || roomObj.id,
+        roomName: stay.roomName || roomObj.name || (roomObj.id ? `Room ${roomObj.id}` : `Room #${stay.roomId}`),
         floor: roomObj.floor || '1',
         bedType: roomObj.bedType || `${stay.bedCount || roomObj.bedCount || 1} Bed`,
         rate,
@@ -91,18 +94,38 @@ export default function RoomCheckoutModal({
       };
 
       // Write to Firebase (shared cloud) first
-      await OccupancyService.update(occupancy.id, {
-        ...body,
-        status: 'checked_out',
-        checkOutActual: actualCheckOut,
-        updatedAt: Date.now()
-      }).catch(e => console.warn('Firebase checkout update:', e));
+      if (occupancy.id) {
+        await OccupancyService.update(occupancy.id, {
+          ...body,
+          status: 'checked_out',
+          checkOutActual: actualCheckOut,
+          updatedAt: Date.now()
+        }).catch(e => console.warn('Firebase checkout update:', e));
+      }
+
+      // Also mark all related stays as checked_out
+      if (Array.isArray(targetStays) && targetStays.length > 0) {
+        for (const s of targetStays) {
+          if (s.id && String(s.id) !== String(occupancy.id)) {
+            await OccupancyService.update(s.id, {
+              status: 'checked_out',
+              checkOutActual: actualCheckOut,
+              updatedAt: Date.now()
+            }).catch(() => {});
+          }
+        }
+      }
 
       // Also update Room status in Firebase
       targetStays.forEach(s => {
-        const rId = s.roomId;
-        if (rId) {
-          RoomService.update(rId, { status: nextRoomStatus }).catch(() => {});
+        const matchedRoom = rooms.find(r => 
+          (s.roomId && String(r.id) === String(s.roomId)) ||
+          (s.roomName && (r.name === s.roomName || `Room ${r.name}` === s.roomName || r.name === String(s.roomName).replace(/^Room\s*#?/i, '')))
+        );
+        if (matchedRoom?.id) {
+          RoomService.update(matchedRoom.id, { status: nextRoomStatus }).catch(() => {});
+        } else if (s.roomId) {
+          RoomService.update(s.roomId, { status: nextRoomStatus }).catch(() => {});
         }
       });
 
