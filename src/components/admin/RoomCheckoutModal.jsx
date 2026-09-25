@@ -55,7 +55,10 @@ export default function RoomCheckoutModal({
         (stay.roomName && (r.name === stay.roomName || `Room ${r.name}` === stay.roomName || r.name === String(stay.roomName).replace(/^Room\s*#?/i, '')))
       ) || {};
       const rate = Number(stay.price || roomObj.price || roomObj.rate || 25);
-      const total = rate * nights;
+      const calculatedTotal = rate * nights;
+      // Use edited totalPrice/totalFee if available (for single-room stays)
+      const stayTotal = Number(stay.totalPrice || stay.totalFee || 0);
+      const total = (targetStays.length === 1 && stayTotal > 0) ? stayTotal : calculatedTotal;
       return {
         id: stay.id,
         roomId: stay.roomId || roomObj.id,

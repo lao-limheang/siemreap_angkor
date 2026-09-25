@@ -194,6 +194,15 @@ export default function RoomsTab({
   const [copiedManifestText, setCopiedManifestText] = useState(false);
   const [guestSuggestOpen, setGuestSuggestOpen] = useState(false);
 
+  // ─── Edit Occupancy (Guest Stay) State ────────────────────────────────────
+  const [editingOccupancy, setEditingOccupancy] = useState(null);
+  const [editOccupancyForm, setEditOccupancyForm] = useState({
+    guestName: '', guestPhone: '', guestNationality: '',
+    passportOrId: '', checkInDate: '', checkOutDate: '',
+    price: 25, totalPrice: 0, bedCount: 1, notes: ''
+  });
+  const [editOccupancySaving, setEditOccupancySaving] = useState(false);
+
   // Helper to extract passport from guest object or notes
   const getGuestPassport = (guest) => {
     if (!guest) return '';
@@ -683,6 +692,68 @@ export default function RoomsTab({
       });
     } catch (err) {
       showModal('error', 'Check-in Failed', err.message);
+    }
+  };
+
+  // ─── EDIT OCCUPANCY (Guest Stay) HANDLERS ────────────────────────────────
+  const openEditOccupancy = (occ) => {
+    setEditingOccupancy(occ);
+    const pricePerNight = Number(occ.price || occ.roomRate || 25);
+    let existingTotal = Number(occ.totalPrice || occ.totalFee || 0);
+    // Auto-calculate total if not previously set
+    if (!existingTotal && occ.checkInDate && occ.checkOutDate) {
+      const d1 = new Date(occ.checkInDate);
+      const d2 = new Date(occ.checkOutDate);
+      const nights = Math.max(1, Math.ceil((d2 - d1) / (1000 * 60 * 60 * 24)));
+      existingTotal = nights * pricePerNight;
+    }
+    setEditOccupancyForm({
+      guestName: occ.guestName || '',
+      guestPhone: occ.guestPhone || '',
+      guestNationality: occ.guestNationality || '',
+      passportOrId: occ.passport || occ.passportOrId || '',
+      checkInDate: occ.checkInDate || '',
+      checkOutDate: occ.checkOutDate || '',
+      price: pricePerNight,
+      totalPrice: existingTotal,
+      bedCount: Number(occ.bedCount || 1),
+      notes: occ.notes || ''
+    });
+  };
+
+  const saveEditOccupancy = async () => {
+    if (!editingOccupancy?.id) return;
+    setEditOccupancySaving(true);
+    try {
+      const payload = {
+        guestName: editOccupancyForm.guestName.trim(),
+        guestPhone: editOccupancyForm.guestPhone.trim(),
+        guestNationality: editOccupancyForm.guestNationality.trim(),
+        passportOrId: editOccupancyForm.passportOrId.trim(),
+        checkInDate: editOccupancyForm.checkInDate,
+        checkOutDate: editOccupancyForm.checkOutDate,
+        price: Number(editOccupancyForm.price || 25),
+        totalPrice: Number(editOccupancyForm.totalPrice || 0),
+        totalFee: Number(editOccupancyForm.totalPrice || 0),
+        bedCount: Number(editOccupancyForm.bedCount || 1),
+        notes: editOccupancyForm.notes.trim(),
+        updatedAt: Date.now()
+      };
+      await OccupancyService.update(editingOccupancy.id, payload);
+      // Also sync to SQLite API (server-side backup)
+      fetch(`/api/room-occupancy/${editingOccupancy.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...(auth?.headers || {}) },
+        body: JSON.stringify(payload)
+      }).catch(() => {});
+      if (fetchAll) fetchAll();
+      if (fetchDash) fetchDash();
+      showModal('success', 'Guest Updated (កែប្រែរួចរាល់)', `Guest "${payload.guestName}" stay information has been updated successfully.`);
+      setEditingOccupancy(null);
+    } catch (err) {
+      showModal('error', 'Update Error', err.message);
+    } finally {
+      setEditOccupancySaving(false);
     }
   };
 
@@ -2728,6 +2799,18 @@ export default function RoomsTab({
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  openEditOccupancy(o);
+                                }}
+                                className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                                title="Edit Guest Info, Price & Dates (កែប្រែព័ត៌មាន)"
+                              >
+                                <i className="fa-solid fa-pen-to-square text-indigo-600 text-xs"></i>
+                                <span>Edit</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
                                   setInvoiceModalGuest(o);
                                   setInvoiceModalRelated(o.relatedStays || [o]);
                                 }}
@@ -2930,6 +3013,18 @@ export default function RoomsTab({
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  openEditOccupancy(o);
+                                }}
+                                className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold rounded-xl transition shadow-2xs cursor-pointer"
+                                title="Edit Guest Info, Price & Dates (កែប្រែព័ត៌មាន)"
+                              >
+                                <i className="fa-solid fa-pen-to-square text-indigo-600 mr-1"></i>
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
                                   setInvoiceModalGuest(o);
                                   setInvoiceModalRelated(o.relatedStays || [o]);
                                 }}
@@ -2993,6 +3088,217 @@ export default function RoomsTab({
                   </table>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════ EDIT OCCUPANCY MODAL ═══════════════════════ */}
+      {editingOccupancy && (
+        <div className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-xs flex items-center justify-center p-4" onClick={() => setEditingOccupancy(null)}>
+          <div
+            className="bg-white rounded-3xl max-w-lg w-full shadow-2xl border border-stone-200 overflow-hidden animate-in fade-in zoom-in duration-200"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="p-5 border-b border-stone-100 bg-gradient-to-r from-indigo-50 to-white flex items-center justify-between">
+              <div>
+                <h4 className="font-display font-bold text-lg text-stone-900 flex items-center gap-2">
+                  <i className="fa-solid fa-pen-to-square text-indigo-600"></i>
+                  Edit Guest Stay (កែប្រែព័ត៌មានភ្ញៀវ)
+                </h4>
+                <p className="text-xs text-stone-500 mt-0.5">
+                  Room {editingOccupancy.roomName || editingOccupancy.roomId} • {editingOccupancy.shotNumber}
+                </p>
+              </div>
+              <button
+                onClick={() => setEditingOccupancy(null)}
+                className="w-9 h-9 rounded-full bg-stone-100 hover:bg-stone-200 text-stone-400 hover:text-stone-600 flex items-center justify-center transition text-lg"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Modal Body / Form */}
+            <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
+              {/* Guest Name */}
+              <div>
+                <label className={labelCls}>Guest Name (ឈ្មោះភ្ញៀវ) <span className="text-rose-500">*</span></label>
+                <input
+                  type="text"
+                  value={editOccupancyForm.guestName}
+                  onChange={e => setEditOccupancyForm(prev => ({ ...prev, guestName: e.target.value }))}
+                  className={inputCls}
+                  placeholder="Full name of guest"
+                  required
+                />
+              </div>
+
+              {/* Phone & Nationality */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Phone (ទូរស័ព្ទ)</label>
+                  <input
+                    type="tel"
+                    value={editOccupancyForm.guestPhone}
+                    onChange={e => setEditOccupancyForm(prev => ({ ...prev, guestPhone: e.target.value }))}
+                    className={inputCls}
+                    placeholder="+855 ..."
+                  />
+                </div>
+                <div>
+                  <label className={labelCls}>Nationality (សញ្ជាតិ)</label>
+                  <input
+                    type="text"
+                    value={editOccupancyForm.guestNationality}
+                    onChange={e => setEditOccupancyForm(prev => ({ ...prev, guestNationality: e.target.value }))}
+                    className={inputCls}
+                    placeholder="e.g. Cambodian, French"
+                  />
+                </div>
+              </div>
+
+              {/* Passport / National ID */}
+              <div>
+                <label className={labelCls}>Passport / National ID (លិខិតឆ្លងដែន / អត្តសញ្ញាណប័ណ្ណ)</label>
+                <input
+                  type="text"
+                  value={editOccupancyForm.passportOrId}
+                  onChange={e => setEditOccupancyForm(prev => ({ ...prev, passportOrId: e.target.value }))}
+                  className={inputCls}
+                  placeholder="e.g. N81234567 or Cambodian ID"
+                />
+              </div>
+
+              {/* Price & Beds */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Room Price / Night ($) <span className="text-rose-500">*</span></label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={editOccupancyForm.price}
+                    onChange={e => setEditOccupancyForm(prev => ({ ...prev, price: parseFloat(e.target.value) || 0 }))}
+                    className={inputCls}
+                  />
+                </div>
+                <div>
+                  <label className={labelCls}>Beds (គ្រែ)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="10"
+                    value={editOccupancyForm.bedCount}
+                    onChange={e => setEditOccupancyForm(prev => ({ ...prev, bedCount: parseInt(e.target.value) || 1 }))}
+                    className={inputCls}
+                  />
+                </div>
+              </div>
+
+              {/* Check-in & Check-out Dates */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Check-in Date (ថ្ងៃចូល) <span className="text-rose-500">*</span></label>
+                  <input
+                    type="date"
+                    value={editOccupancyForm.checkInDate}
+                    onChange={e => setEditOccupancyForm(prev => ({ ...prev, checkInDate: e.target.value }))}
+                    className={inputCls}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className={labelCls}>Check-out Date (ថ្ងៃចេញ)</label>
+                  <input
+                    type="date"
+                    value={editOccupancyForm.checkOutDate}
+                    onChange={e => setEditOccupancyForm(prev => ({ ...prev, checkOutDate: e.target.value }))}
+                    className={inputCls}
+                  />
+                </div>
+              </div>
+
+              {/* Stay Duration & Total Price */}
+              {(() => {
+                const hasCheckIn = editOccupancyForm.checkInDate;
+                const hasCheckOut = editOccupancyForm.checkOutDate;
+                let nightCount = 0;
+                let autoTotal = 0;
+                if (hasCheckIn && hasCheckOut) {
+                  const d1 = new Date(editOccupancyForm.checkInDate);
+                  const d2 = new Date(editOccupancyForm.checkOutDate);
+                  nightCount = Math.max(1, Math.ceil((d2 - d1) / (1000 * 60 * 60 * 24)));
+                  autoTotal = nightCount * (editOccupancyForm.price || 0);
+                }
+                return (
+                  <div className="p-3.5 bg-gradient-to-br from-indigo-50/80 to-amber-50/40 border border-indigo-200 rounded-xl space-y-3">
+                    {hasCheckIn && hasCheckOut && (
+                      <div className="flex justify-between text-xs font-semibold text-indigo-800">
+                        <span>Duration:</span>
+                        <span className="font-bold">{nightCount} Night{nightCount > 1 ? 's' : ''} × ${editOccupancyForm.price}/night = ${autoTotal.toFixed(2)}</span>
+                      </div>
+                    )}
+                    <div>
+                      <label className={labelCls}>
+                        Total Price ($) (តម្លៃសរុប) <span className="text-rose-500">*</span>
+                        {hasCheckIn && hasCheckOut && editOccupancyForm.totalPrice !== autoTotal && (
+                          <button
+                            type="button"
+                            onClick={() => setEditOccupancyForm(prev => ({ ...prev, totalPrice: autoTotal }))}
+                            className="ml-2 text-[10px] text-indigo-600 hover:text-indigo-800 underline font-medium cursor-pointer"
+                          >
+                            Reset to ${autoTotal.toFixed(2)}
+                          </button>
+                        )}
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        value={editOccupancyForm.totalPrice}
+                        onChange={e => setEditOccupancyForm(prev => ({ ...prev, totalPrice: parseFloat(e.target.value) || 0 }))}
+                        className={`${inputCls} text-lg font-black`}
+                      />
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Notes */}
+              <div>
+                <label className={labelCls}>Special Notes (ចំណាំ)</label>
+                <textarea
+                  value={editOccupancyForm.notes}
+                  onChange={e => setEditOccupancyForm(prev => ({ ...prev, notes: e.target.value }))}
+                  className={`${inputCls} resize-none`}
+                  rows={3}
+                  placeholder="Passport ID, extra towel, early check-out..."
+                />
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-5 border-t border-stone-100 bg-stone-50/50 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setEditingOccupancy(null)}
+                className={`${btnSecondary} flex-1`}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveEditOccupancy}
+                disabled={editOccupancySaving || !editOccupancyForm.guestName.trim()}
+                className={`${btnPrimary} flex-1 flex items-center justify-center gap-1.5`}
+              >
+                {editOccupancySaving ? (
+                  <><i className="fa-solid fa-spinner fa-spin text-xs"></i> Saving...</>
+                ) : (
+                  <><i className="fa-solid fa-check text-xs"></i> Save Changes (រក្សាទុក)</>
+                )}
+              </button>
             </div>
           </div>
         </div>

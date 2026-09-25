@@ -83,7 +83,10 @@ export default function RoomInvoiceModal({
 
       const rawRate = Number(stay.price || stay.roomRate || roomObj.price || roomObj.rate || 25);
       const rate = isNaN(rawRate) || rawRate <= 0 ? 25 : rawRate;
-      const total = rate * nights;
+      const calculatedTotal = rate * nights;
+      // Use the edited totalPrice/totalFee if available (for single-room stays)
+      const stayTotal = Number(stay.totalPrice || stay.totalFee || 0);
+      const total = (allStays.length === 1 && stayTotal > 0) ? stayTotal : calculatedTotal;
 
       let cleanRoomName = 'Room 101';
       if (stay.roomName && String(stay.roomName).trim() && String(stay.roomName).trim().toLowerCase() !== 'null' && String(stay.roomName).trim() !== 'room #null') {
@@ -126,7 +129,9 @@ export default function RoomInvoiceModal({
 
   const grandTotal = primaryStay.totalAmount !== undefined
     ? Number(primaryStay.totalAmount)
-    : Math.max(0, subtotal - discount);
+    : (primaryStay.totalPrice || primaryStay.totalFee)
+      ? Number(primaryStay.totalPrice || primaryStay.totalFee)
+      : Math.max(0, subtotal - discount);
   const grandTotalKhr = grandTotal * exchangeRate;
   const invoiceNumber = primaryStay.invoiceNumber || `INV-RM-${primaryStay.id || '001'}-${String(checkInDate).replace(/-/g, '').slice(2)}`;
   const invoiceDate = formatSafeDate(primaryStay.createdAt);
