@@ -42,6 +42,11 @@ export default function RoomInvoiceModal({
   const showSignatures = invSettings.showSignatures !== false;
   const showTaxId = invSettings.showTaxId !== false;
   const showGuestId = invSettings.showGuestId !== false;
+  const showSubtitle = invSettings.showSubtitle !== false;
+  const showAddress = invSettings.showAddress !== false;
+  const showPhoneEmail = invSettings.showPhoneEmail !== false;
+  const showCompanyInfo = invSettings.showCompanyInfo !== false;
+  const showPaymentStatus = invSettings.showPaymentStatus !== false;
   const customFooterNote = invSettings.footerNote || 'Thank you for choosing Siem Reap Angkor! We hope you have a pleasant stay near the temples.';
 
   // Determine all rooms for this guest (multi-room support)
@@ -56,6 +61,13 @@ export default function RoomInvoiceModal({
   const passportOrId = primaryStay.passportOrId || primaryStay.passport || 'N/A';
   const checkInDate = primaryStay.checkInDate || new Date().toISOString().split('T')[0];
   const checkOutDate = primaryStay.checkOutDate || 'Open';
+
+  // Guest company / billing info
+  const guestCompany = primaryStay.guestCompany || '';
+  const guestVatin = primaryStay.guestVatin || '';
+  const guestCompanyPhone = primaryStay.guestCompanyPhone || '';
+  const guestCompanyAddress = primaryStay.guestCompanyAddress || '';
+  const hasCompanyInfo = !!(guestCompany || guestVatin);
 
   // Calculate nights
   let nights = 1;
@@ -162,7 +174,7 @@ export default function RoomInvoiceModal({
       document.body.appendChild(iframe);
     }
 
-    let stylesHtml = '';
+    let stylesHtml = '<link href="https://fonts.googleapis.com/css2?family=Battambang:wght@400;700&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">\n';
     document.querySelectorAll('style, link[rel="stylesheet"]').forEach(el => {
       stylesHtml += el.outerHTML + '\n';
     });
@@ -193,6 +205,10 @@ export default function RoomInvoiceModal({
               color: #111827 !important;
               -webkit-print-color-adjust: exact !important;
               print-color-adjust: exact !important;
+              font-family: 'Inter', 'Battambang', system-ui, -apple-system, sans-serif !important;
+            }
+            .khmer-text {
+              font-family: 'Battambang', 'Khmer OS', 'Khmer OS Battambang', sans-serif !important;
             }
             body {
               font-family: ${isPosFormat ? 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' : 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'} !important;
@@ -371,12 +387,14 @@ export default function RoomInvoiceModal({
                 )}
                 <div>
                   <h1 className="font-bold text-lg text-stone-900 leading-tight">{hotelName}</h1>
-                  {hotelSubtitle && <p className="text-[11px] text-stone-500">{hotelSubtitle}</p>}
-                  <p className="text-[11px] text-stone-500 mt-0.5 max-w-xs">{hotelAddress}</p>
-                  <div className="flex flex-wrap gap-x-3 text-[11px] text-stone-500 mt-1 font-mono">
-                    <span>📞 {hotelPhone}</span>
-                    {hotelEmail && <span>✉️ {hotelEmail}</span>}
-                  </div>
+                  {showSubtitle && hotelSubtitle && <p className="text-[11px] text-stone-500">{hotelSubtitle}</p>}
+                  {showAddress && <p className="text-[11px] text-stone-500 mt-0.5 max-w-xs">{hotelAddress}</p>}
+                  {showPhoneEmail && (
+                    <div className="flex flex-wrap gap-x-3 text-[11px] text-stone-500 mt-1 font-mono">
+                      <span>📞 {hotelPhone}</span>
+                      {hotelEmail && <span>✉️ {hotelEmail}</span>}
+                    </div>
+                  )}
                   {showTaxId && taxNumber && (
                     <p className="text-[10px] text-stone-400 font-mono mt-0.5">VATTIN / TAX ID: {taxNumber}</p>
                   )}
@@ -384,11 +402,13 @@ export default function RoomInvoiceModal({
               </div>
 
               <div className="text-left sm:text-right">
-                <span className={`inline-block px-3 py-1 rounded-full font-bold text-[11px] tracking-wider uppercase mb-2 ${
-                  paymentStatus === 'PAID' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                }`}>
-                  {paymentStatus === 'PAID' ? 'PAID / វិក្កយបត្រផ្លូវការ' : 'UNPAID / មិនទាន់ទូទាត់'}
-                </span>
+                {showPaymentStatus && (
+                  <span className={`inline-block px-3 py-1 rounded-full font-bold text-[11px] tracking-wider uppercase mb-2 ${
+                    paymentStatus === 'PAID' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                  }`}>
+                    {paymentStatus === 'PAID' ? 'PAID / វិក្កយបត្រផ្លូវការ' : 'UNPAID / មិនទាន់ទូទាត់'}
+                  </span>
+                )}
                 <p className="text-xs text-stone-400 font-mono">INVOICE NO.</p>
                 <p className="text-sm font-black font-mono text-stone-900">{invoiceNumber}</p>
                 <p className="text-[11px] text-stone-500 mt-0.5">
@@ -397,40 +417,56 @@ export default function RoomInvoiceModal({
               </div>
             </div>
 
-            {/* Guest & Stay Meta Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-stone-50 p-4 rounded-2xl border border-stone-200/80 mb-6">
-              <div>
-                <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block mb-1">
-                  Guest Details (ព័ត៌មានភ្ញៀវ)
-                </span>
-                <p className="text-sm font-bold text-stone-900">{guestName}</p>
-                <div className="mt-1 space-y-0.5 text-stone-600 text-xs">
-                  <p><span className="text-stone-400">Phone:</span> <span className="font-mono">{guestPhone}</span></p>
-                  <p><span className="text-stone-400">Nationality:</span> <span>{guestNationality}</span></p>
-                  {showGuestId && (
-                    <p><span className="text-stone-400">Passport / ID:</span> <span className="font-mono font-bold text-stone-800">{passportOrId}</span></p>
-                  )}
-                </div>
+            {/* Guest Details (combined with Bill-To) */}
+            <div className="bg-stone-50 p-4 rounded-2xl border border-stone-200/80 mb-4">
+              <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block mb-1.5">
+                Guest Details (ព័ត៌មានភ្ញៀវ)
+              </span>
+              <p className="text-sm font-bold text-stone-900">{guestName}</p>
+              {showCompanyInfo && hasCompanyInfo && guestCompany && (
+                <p className="text-xs text-stone-700 font-semibold mt-0.5">{guestCompany}</p>
+              )}
+              <div className="mt-1.5 space-y-0.5 text-stone-600 text-xs">
+                {showCompanyInfo && hasCompanyInfo && guestVatin && (
+                  <p><span className="text-stone-400">VATIN:</span> <span className="font-mono font-bold text-stone-800">{guestVatin}</span></p>
+                )}
+                <p><span className="text-stone-400">Phone:</span> <span className="font-mono">{guestPhone}</span></p>
+                {showCompanyInfo && hasCompanyInfo && guestCompanyPhone && guestCompanyPhone !== guestPhone && (
+                  <p><span className="text-stone-400">Company Tel:</span> <span className="font-mono">{guestCompanyPhone}</span></p>
+                )}
+                <p><span className="text-stone-400">Nationality:</span> <span>{guestNationality}</span></p>
+                {showGuestId && (
+                  <p><span className="text-stone-400">Passport / ID:</span> <span className="font-mono font-bold text-stone-800">{passportOrId}</span></p>
+                )}
+                {showCompanyInfo && hasCompanyInfo && guestCompanyAddress && (
+                  <p className="leading-relaxed khmer-text pt-0.5" style={{ fontFamily: "'Battambang', 'Khmer OS', sans-serif" }}>
+                    <span className="text-stone-400" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>អាសយដ្ឋាន:</span>{' '}
+                    {guestCompanyAddress}
+                  </p>
+                )}
               </div>
+            </div>
 
-              <div>
-                <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block mb-1">
-                  Stay Period (កាលបរិច្ឆេទស្នាក់នៅ)
-                </span>
-                <div className="grid grid-cols-2 gap-2 mt-1 text-xs">
-                  <div className="bg-white p-2 rounded-xl border border-stone-200/60">
-                    <span className="text-[10px] text-stone-400 block">Check-in</span>
-                    <span className="font-bold text-stone-800 font-mono">{checkInDate}</span>
-                  </div>
-                  <div className="bg-white p-2 rounded-xl border border-stone-200/60">
-                    <span className="text-[10px] text-stone-400 block">Check-out</span>
-                    <span className="font-bold text-stone-800 font-mono">{checkOutDate}</span>
-                  </div>
-                </div>
-                <p className="text-[11px] text-stone-500 mt-2">
-                  Total Duration: <strong className="text-stone-800">{nights} Night(s)</strong> • Rooms: <strong className="text-stone-800">{items.length} Room(s)</strong>
-                </p>
-              </div>
+            {/* Stay Period Table */}
+            <div className="mb-6">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-stone-200 text-[10px] font-bold text-stone-400 uppercase tracking-wider">
+                    <th className="py-2 px-2">Check-in</th>
+                    <th className="py-2 px-2">Check-out</th>
+                    <th className="py-2 px-2 text-center">Duration</th>
+                    <th className="py-2 px-2 text-right">Rooms</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b border-stone-100">
+                    <td className="py-2.5 px-2 font-mono font-bold text-stone-800">{checkInDate}</td>
+                    <td className="py-2.5 px-2 font-mono font-bold text-stone-800">{checkOutDate}</td>
+                    <td className="py-2.5 px-2 text-center font-bold text-stone-800">{nights} Night(s)</td>
+                    <td className="py-2.5 px-2 text-right font-bold text-stone-800">{items.length} Room(s)</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
 
             {/* Line Items Table */}
@@ -534,9 +570,9 @@ export default function RoomInvoiceModal({
                 />
               )}
               <h2 className="font-black text-sm uppercase tracking-wider">{hotelName}</h2>
-              {hotelSubtitle && <p className="text-[10px] text-stone-600">{hotelSubtitle}</p>}
-              <p className="text-[10px] text-stone-600">{hotelAddress}</p>
-              <p className="text-[10px] text-stone-600">Tel: {hotelPhone}</p>
+              {showSubtitle && hotelSubtitle && <p className="text-[10px] text-stone-600">{hotelSubtitle}</p>}
+              {showAddress && <p className="text-[10px] text-stone-600">{hotelAddress}</p>}
+              {showPhoneEmail && <p className="text-[10px] text-stone-600">Tel: {hotelPhone}</p>}
               {showTaxId && taxNumber && (
                 <p className="text-[9px] text-stone-500">VAT: {taxNumber}</p>
               )}
@@ -563,6 +599,20 @@ export default function RoomInvoiceModal({
               )}
               {showGuestId && passportOrId && passportOrId !== 'N/A' && (
                 <div>ID/DOC: {passportOrId}</div>
+              )}
+              {showCompanyInfo && hasCompanyInfo && (
+                <>
+                  <div className="my-1 border-b border-dotted border-stone-300"></div>
+                  <div className="font-bold text-[10px]">BILL TO:</div>
+                  {guestCompany && <div>{guestCompany}</div>}
+                  {guestVatin && <div>VATIN: {guestVatin}</div>}
+                  {guestCompanyPhone && <div>TEL: {guestCompanyPhone}</div>}
+                  {guestCompanyAddress && (
+                    <div className="khmer-text" style={{ fontFamily: "'Battambang', 'Khmer OS', sans-serif", fontSize: '9px', lineHeight: '1.4' }}>
+                      {guestCompanyAddress}
+                    </div>
+                  )}
+                </>
               )}
               <div className="flex justify-between">
                 <span>STAY: {checkInDate} ➔ {checkOutDate}</span>

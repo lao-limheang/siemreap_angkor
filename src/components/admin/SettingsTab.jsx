@@ -159,6 +159,11 @@ export default function SettingsTab({
   const currentInvShowSignatures = invSettings.showSignatures !== false;
   const currentInvShowTaxId = invSettings.showTaxId !== false;
   const currentInvShowGuestId = invSettings.showGuestId !== false;
+  const currentInvShowSubtitle = invSettings.showSubtitle !== false;
+  const currentInvShowAddress = invSettings.showAddress !== false;
+  const currentInvShowPhoneEmail = invSettings.showPhoneEmail !== false;
+  const currentInvShowCompanyInfo = invSettings.showCompanyInfo !== false;
+  const currentInvShowPaymentStatus = invSettings.showPaymentStatus !== false;
   const [invPreviewMode, setInvPreviewMode] = useState(invSettings.paperSize || 'a4');
 
   const updateInvoiceSetting = (field, val) => {
@@ -1417,6 +1422,41 @@ export default function SettingsTab({
                     title: 'Show Guest ID / Passport',
                     kh: 'បង្ហាញលេខអត្តសញ្ញាណប័ណ្ណ',
                     desc: 'Displays the guest National ID or Passport Number on the printed folio'
+                  },
+                  {
+                    key: 'showSubtitle',
+                    val: currentInvShowSubtitle,
+                    title: 'Show Subtitle / Slogan',
+                    kh: 'បង្ហាញពាក្យស្លោក',
+                    desc: 'Show the business subtitle or slogan line below the company name on the invoice header'
+                  },
+                  {
+                    key: 'showAddress',
+                    val: currentInvShowAddress,
+                    title: 'Show Address',
+                    kh: 'បង្ហាញអាសយដ្ឋាន',
+                    desc: 'Show the business address on the invoice header (both A4 folio and POS receipt)'
+                  },
+                  {
+                    key: 'showPhoneEmail',
+                    val: currentInvShowPhoneEmail,
+                    title: 'Show Phone & Email',
+                    kh: 'បង្ហាញទូរស័ព្ទ និង អ៊ីមែល',
+                    desc: 'Show business phone number and email on the invoice header'
+                  },
+                  {
+                    key: 'showCompanyInfo',
+                    val: currentInvShowCompanyInfo,
+                    title: 'Show Guest Company / Bill-To',
+                    kh: 'បង្ហាញក្រុមហ៊ុនភ្ញៀវ / វិក្កយបត្រទៅ',
+                    desc: 'Show guest company name, VATIN, company phone, and Khmer address on invoice'
+                  },
+                  {
+                    key: 'showPaymentStatus',
+                    val: currentInvShowPaymentStatus,
+                    title: 'Show Payment Status Badge',
+                    kh: 'បង្ហាញស្ថានភាពការទូទាត់',
+                    desc: 'Show the PAID / UNPAID badge on the top-right corner of the invoice'
                   }
                 ].map(opt => (
                   <div key={opt.key} className="flex items-start justify-between p-4 bg-stone-50 rounded-2xl border border-stone-200">

@@ -169,6 +169,10 @@ export default function RoomsTab({
     guestPhone: '',
     guestNationality: '',
     passportOrId: '',
+    guestCompany: '',
+    guestVatin: '',
+    guestCompanyPhone: '',
+    guestCompanyAddress: '',
     bedCount: 1,
     checkInDate: today ? today() : new Date().toISOString().split('T')[0],
     checkOutDate: '',
@@ -199,6 +203,7 @@ export default function RoomsTab({
   const [editOccupancyForm, setEditOccupancyForm] = useState({
     guestName: '', guestPhone: '', guestNationality: '',
     passportOrId: '', checkInDate: '', checkOutDate: '',
+    guestCompany: '', guestVatin: '', guestCompanyPhone: '', guestCompanyAddress: '',
     price: 25, totalPrice: 0, bedCount: 1, notes: ''
   });
   const [editOccupancySaving, setEditOccupancySaving] = useState(false);
@@ -685,6 +690,10 @@ export default function RoomsTab({
         guestPhone: '',
         guestNationality: '',
         passportOrId: '',
+        guestCompany: '',
+        guestVatin: '',
+        guestCompanyPhone: '',
+        guestCompanyAddress: '',
         bedCount: 1,
         checkInDate: today ? today() : new Date().toISOString().split('T')[0],
         checkOutDate: '',
@@ -712,6 +721,10 @@ export default function RoomsTab({
       guestPhone: occ.guestPhone || '',
       guestNationality: occ.guestNationality || '',
       passportOrId: occ.passport || occ.passportOrId || '',
+      guestCompany: occ.guestCompany || '',
+      guestVatin: occ.guestVatin || '',
+      guestCompanyPhone: occ.guestCompanyPhone || '',
+      guestCompanyAddress: occ.guestCompanyAddress || '',
       checkInDate: occ.checkInDate || '',
       checkOutDate: occ.checkOutDate || '',
       price: pricePerNight,
@@ -730,6 +743,10 @@ export default function RoomsTab({
         guestPhone: editOccupancyForm.guestPhone.trim(),
         guestNationality: editOccupancyForm.guestNationality.trim(),
         passportOrId: editOccupancyForm.passportOrId.trim(),
+        guestCompany: editOccupancyForm.guestCompany.trim(),
+        guestVatin: editOccupancyForm.guestVatin.trim(),
+        guestCompanyPhone: editOccupancyForm.guestCompanyPhone.trim(),
+        guestCompanyAddress: editOccupancyForm.guestCompanyAddress.trim(),
         checkInDate: editOccupancyForm.checkInDate,
         checkOutDate: editOccupancyForm.checkOutDate,
         price: Number(editOccupancyForm.price || 25),
@@ -963,6 +980,10 @@ export default function RoomsTab({
       guestPhone: '',
       guestNationality: '',
       passportOrId: '',
+      guestCompany: '',
+      guestVatin: '',
+      guestCompanyPhone: '',
+      guestCompanyAddress: '',
       bedCount: room.bedCount || 1,
       checkInDate: today ? today() : new Date().toISOString().split('T')[0],
       checkOutDate: '',
@@ -2093,7 +2114,11 @@ export default function RoomsTab({
                             guestName: c.name || prev.guestName,
                             guestPhone: c.phone || prev.guestPhone,
                             guestNationality: c.nationality || prev.guestNationality,
-                            passportOrId: c.passportOrId || c.passportId || prev.passportOrId
+                            passportOrId: c.passportOrId || c.passportId || prev.passportOrId,
+                            guestCompany: c.guestCompany || c.company || prev.guestCompany,
+                            guestVatin: c.guestVatin || c.vatin || prev.guestVatin,
+                            guestCompanyPhone: c.guestCompanyPhone || c.companyPhone || prev.guestCompanyPhone,
+                            guestCompanyAddress: c.guestCompanyAddress || c.companyAddress || prev.guestCompanyAddress
                           }));
                           setGuestSuggestOpen(false);
                         }}
@@ -2158,6 +2183,60 @@ export default function RoomsTab({
                 </div>
                 <p className="text-[10px] text-stone-500 mt-1">Required for security database & Sangkat police reporting</p>
               </div>
+
+              {/* Company / Billing Info (collapsible) */}
+              <details className="group">
+                <summary className="flex items-center gap-2 cursor-pointer select-none py-2 text-xs font-bold text-amber-700 hover:text-amber-800 transition">
+                  <i className="fa-solid fa-building text-[11px]"></i>
+                  <span>Company / Bill-To Info (ព័ត៌មានក្រុមហ៊ុន — ស្រេចចិត្ត)</span>
+                  <i className="fa-solid fa-chevron-down text-[10px] transition-transform group-open:rotate-180 ml-auto text-stone-400"></i>
+                </summary>
+                <div className="mt-2 p-3.5 bg-amber-50/50 border border-amber-200/60 rounded-xl space-y-3 anim-fade-in">
+                  <div>
+                    <label className={labelCls}>Company Name (ឈ្មោះក្រុមហ៊ុន)</label>
+                    <input
+                      type="text"
+                      value={checkInForm.guestCompany}
+                      onChange={e => setCheckInForm({ ...checkInForm, guestCompany: e.target.value })}
+                      placeholder="e.g. TF Motors (Cambodia) Co., Ltd"
+                      className={inputCls}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className={labelCls}>VATIN (លេខអត្តសញ្ញាណកម្មពន្ធ)</label>
+                      <input
+                        type="text"
+                        value={checkInForm.guestVatin}
+                        onChange={e => setCheckInForm({ ...checkInForm, guestVatin: e.target.value })}
+                        placeholder="e.g. L001-104008598"
+                        className={`${inputCls} font-mono`}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Company Tel (ទូរស័ព្ទក្រុមហ៊ុន)</label>
+                      <input
+                        type="text"
+                        value={checkInForm.guestCompanyPhone}
+                        onChange={e => setCheckInForm({ ...checkInForm, guestCompanyPhone: e.target.value })}
+                        placeholder="e.g. 087 882 998"
+                        className={inputCls}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className={labelCls}>Company Address / អាសយដ្ឋានក្រុមហ៊ុន</label>
+                    <textarea
+                      rows="2"
+                      value={checkInForm.guestCompanyAddress}
+                      onChange={e => setCheckInForm({ ...checkInForm, guestCompanyAddress: e.target.value })}
+                      placeholder="174-175 (ប្លុក 1C, 1D និង 2C, 2D) នៃកាលីហ្វ័រញ៉ា..."
+                      className={`${inputCls} resize-none`}
+                    />
+                    <p className="text-[10px] text-stone-400 mt-0.5">Supports Khmer text (អក្សរខ្មែរ). Shown on invoice "Bill To" section.</p>
+                  </div>
+                </div>
+              </details>
 
               <div className="grid grid-cols-3 gap-3">
                 <div>
@@ -3169,6 +3248,59 @@ export default function RoomsTab({
                   placeholder="e.g. N81234567 or Cambodian ID"
                 />
               </div>
+
+              {/* Company / Billing Info (collapsible) */}
+              <details className="group" open={!!(editOccupancyForm.guestCompany || editOccupancyForm.guestVatin)}>
+                <summary className="flex items-center gap-2 cursor-pointer select-none py-2 text-xs font-bold text-amber-700 hover:text-amber-800 transition">
+                  <i className="fa-solid fa-building text-[11px]"></i>
+                  <span>Company / Bill-To (ក្រុមហ៊ុន)</span>
+                  <i className="fa-solid fa-chevron-down text-[10px] transition-transform group-open:rotate-180 ml-auto text-stone-400"></i>
+                </summary>
+                <div className="mt-2 p-3.5 bg-amber-50/50 border border-amber-200/60 rounded-xl space-y-3 anim-fade-in">
+                  <div>
+                    <label className={labelCls}>Company Name (ឈ្មោះក្រុមហ៊ុន)</label>
+                    <input
+                      type="text"
+                      value={editOccupancyForm.guestCompany}
+                      onChange={e => setEditOccupancyForm(prev => ({ ...prev, guestCompany: e.target.value }))}
+                      placeholder="e.g. TF Motors (Cambodia) Co., Ltd"
+                      className={inputCls}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className={labelCls}>VATIN (អត្តសញ្ញាណកម្មពន្ធ)</label>
+                      <input
+                        type="text"
+                        value={editOccupancyForm.guestVatin}
+                        onChange={e => setEditOccupancyForm(prev => ({ ...prev, guestVatin: e.target.value }))}
+                        placeholder="e.g. L001-104008598"
+                        className={`${inputCls} font-mono`}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Company Tel (ទូរស័ព្ទ)</label>
+                      <input
+                        type="text"
+                        value={editOccupancyForm.guestCompanyPhone}
+                        onChange={e => setEditOccupancyForm(prev => ({ ...prev, guestCompanyPhone: e.target.value }))}
+                        placeholder="e.g. 087 882 998"
+                        className={inputCls}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className={labelCls}>Company Address / អាសយដ្ឋាន</label>
+                    <textarea
+                      rows="2"
+                      value={editOccupancyForm.guestCompanyAddress}
+                      onChange={e => setEditOccupancyForm(prev => ({ ...prev, guestCompanyAddress: e.target.value }))}
+                      placeholder="174-175 (ប្លុក 1C, 1D និង 2C, 2D)..."
+                      className={`${inputCls} resize-none`}
+                    />
+                  </div>
+                </div>
+              </details>
 
               {/* Price & Beds */}
               <div className="grid grid-cols-2 gap-3">
