@@ -3,6 +3,7 @@ import PaginationControls from '../common/PaginationControls';
 import { BookingService, OccupancyService, RoomService } from '../../services/DatabaseService';
 import { useModal } from '../common/ModalProvider';
 import RoomInvoiceModal from './RoomInvoiceModal';
+import SearchRoomPicker from './SearchRoomPicker';
 
 export default function RoomHistoryTab({
   occupancy = [],
@@ -623,18 +624,22 @@ export default function RoomHistoryTab({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className={labelCls}>Room</label>
-                  <select
-                    value={editingRecord.roomId}
-                    onChange={e => setEditingRecord({ ...editingRecord, roomId: e.target.value })}
-                    className={inputCls}
-                    required
-                  >
-                    <option value="">Select Room</option>
-                    {rooms.map(r => (
-                      <option key={r.id} value={r.id}>{r.name} ({r.categoryName || r.type || 'Room'})</option>
-                    ))}
-                  </select>
+                  <SearchRoomPicker
+                    label="Room"
+                    rooms={rooms}
+                    selectedRoomId={editingRecord.roomId}
+                    onSelect={(id, sel) => {
+                      setEditingRecord({
+                        ...editingRecord,
+                        roomId: id,
+                        roomName: sel ? sel.name : editingRecord.roomName
+                      });
+                    }}
+                    multiple={false}
+                    required={true}
+                    compact={true}
+                    placeholder="Search room..."
+                  />
                 </div>
                 <div>
                   <label className={labelCls}>Bed Count</label>

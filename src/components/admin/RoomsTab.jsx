@@ -1048,110 +1048,627 @@ export default function RoomsTab({
     }
   };
 
+  // ─── RENDER ACTIVE CHECKED-IN GUESTS (REUSABLE FOR STANDALONE TAB & OCCUPANCY) ───
+  const renderActiveCheckedInGuests = (isStandalone = false) => (
+            <div className={`${cardCls} overflow-hidden border-2 border-stone-200 shadow-sm`}>
+              {/* Header with Title, Badges, Security Action and View Switcher */}
+              <div className="p-5 bg-gradient-to-r from-stone-900 via-stone-850 to-stone-900 text-white flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 text-lg shadow-inner">
+                    <i className="fa-solid fa-user-shield"></i>
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-black text-white text-base tracking-wide">
+                        Active Checked-in Guests (ភ្ញៀវកំពុងស្នាក់នៅ)
+                      </h3>
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500 text-white font-mono font-black text-xs shadow-xs">
+                        {occupancyStats.total}
+                      </span>
+                    </div>
+                    <p className="text-xs text-stone-300">
+                      Real-time in-house guests • Shot View numbers & security verification
+                    </p>
+                  </div>
+                </div>
+
+                {/* Security Database Request and Quick Action Buttons */}
+                <div className="flex flex-wrap items-center gap-2">
+                  {isStandalone && (
+                    <button
+                      type="button"
+                      onClick={() => setSubSection('occupancy')}
+                      className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold rounded-xl transition-all shadow-md hover:shadow-lg flex items-center gap-1.5 cursor-pointer active:scale-95"
+                      title="ចុះឈ្មោះភ្ញៀវថ្មី (New Check-in)"
+                    >
+                      <i className="fa-solid fa-plus text-xs"></i>
+                      <span>New Check-in</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowSecurityManifestModal(true)}
+                    className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold rounded-xl transition-all shadow-md hover:shadow-lg flex items-center gap-2 cursor-pointer active:scale-95"
+                    title="បើកផ្ទាំងទិន្នន័យស្នើសុំសន្តិសុខ / Security Database Request Manifest"
+                  >
+                    <i className="fa-solid fa-shield-halved text-emerald-200 text-sm"></i>
+                    <span>Security Database Request</span>
+                    <span className="px-1.5 py-0.5 bg-black/20 rounded-md text-[10px] font-black">
+                      {occupancyStats.total}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const text = generateSecurityManifestText();
+                      copyText(text, 'manifest-quick');
+                      showModal('success', 'Copied to Clipboard', 'Guest security manifest copied. Ready to paste into Telegram or Police report.');
+                    }}
+                    className="px-3 py-2 bg-white/10 hover:bg-white/20 text-stone-200 hover:text-white border border-white/20 text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                    title="Copy formatted security manifest text"
+                  >
+                    <i className="fa-solid fa-copy text-amber-400 text-xs"></i>
+                    <span>{copiedId === 'manifest-quick' ? 'Copied!' : 'Copy Data'}</span>
+                  </button>
+
+                  {/* View Mode Switcher: Shot Cards vs Table */}
+                  <div className="bg-black/30 p-1 rounded-xl border border-white/10 flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setOccupancyViewMode('cards')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
+                        occupancyViewMode === 'cards'
+                          ? 'bg-amber-500 text-stone-950 shadow-sm'
+                          : 'text-stone-300 hover:text-white'
+                      }`}
+                      title="Shot View / Compact Cards with Large Numbers"
+                    >
+                      <i className="fa-solid fa-camera text-[11px]"></i>
+                      <span className="hidden sm:inline">Shot View</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOccupancyViewMode('table')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
+                        occupancyViewMode === 'table'
+                          ? 'bg-amber-500 text-stone-950 shadow-sm'
+                          : 'text-stone-300 hover:text-white'
+                      }`}
+                      title="Easy Table List View"
+                    >
+                      <i className="fa-solid fa-table text-[11px]"></i>
+                      <span className="hidden sm:inline">Table View</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick Summary Pill Bar */}
+              <div className="px-5 py-3 bg-stone-100 border-b border-stone-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-stone-200 rounded-lg font-bold text-stone-700 shadow-2xs">
+                    <i className="fa-solid fa-users text-brand-600 text-xs"></i>
+                    <span>In-House: <strong className="text-stone-900">{occupancyStats.total} Guests</strong></span>
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-stone-200 rounded-lg font-bold text-stone-700 shadow-2xs">
+                    <i className="fa-solid fa-door-open text-indigo-600 text-xs"></i>
+                    <span>Rooms: <strong className="text-stone-900">{occupancyStats.occupiedRoomsCount} In-Use</strong></span>
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-stone-200 rounded-lg font-bold text-stone-700 shadow-2xs">
+                    <i className="fa-solid fa-earth-americas text-blue-600 text-xs"></i>
+                    <span>Foreign: <strong className="text-blue-700">{occupancyStats.foreign}</strong></span>
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-stone-200 rounded-lg font-bold text-stone-700 shadow-2xs">
+                    <i className="fa-solid fa-flag text-rose-600 text-xs"></i>
+                    <span>Khmer: <strong className="text-rose-700">{occupancyStats.khmer}</strong></span>
+                  </span>
+                  {occupancyStats.dueToday > 0 && (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-100 border border-amber-300 text-amber-900 rounded-lg font-bold animate-pulse shadow-2xs">
+                      <i className="fa-solid fa-bell text-amber-600 text-xs"></i>
+                      <span>Due Out Today: <strong>{occupancyStats.dueToday}</strong></span>
+                    </span>
+                  )}
+                </div>
+
+                <div className="text-[11px] text-stone-500 font-medium">
+                  Showing {filteredOccupancy.length} of {occupancyStats.total} active stays
+                </div>
+              </div>
+
+              {/* Search & Filter Toolbar */}
+              <div className="p-4 bg-white border-b border-stone-100 flex flex-wrap items-center justify-between gap-3">
+                <div className="relative flex-1 min-w-[220px] max-w-md">
+                  <i className="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400 text-xs"></i>
+                  <input
+                    type="text"
+                    value={occupancySearch}
+                    onChange={e => setOccupancySearch(e.target.value)}
+                    placeholder="Search guest name, room #, passport/ID, phone..."
+                    className="w-full pl-9 pr-8 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs font-medium text-stone-800 placeholder-stone-400 focus:bg-white focus:border-brand-500 focus:ring-2 focus:ring-brand-100 outline-none transition"
+                  />
+                  {occupancySearch && (
+                    <button
+                      type="button"
+                      onClick={() => setOccupancySearch('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 text-xs"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                  {[
+                    { id: 'all', label: 'All Active', count: occupancyStats.total },
+                    { id: 'due-today', label: 'Due Checkout Today', count: occupancyStats.dueToday },
+                    { id: 'foreign', label: 'Foreign Guests', count: occupancyStats.foreign },
+                    { id: 'khmer', label: 'Cambodian', count: occupancyStats.khmer }
+                  ].map(tab => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setOccupancyFilter(tab.id)}
+                      className={`px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                        occupancyFilter === tab.id
+                          ? 'bg-stone-900 text-white shadow-xs'
+                          : 'bg-stone-100 hover:bg-stone-200 text-stone-700'
+                      }`}
+                    >
+                      <span>{tab.label}</span>
+                      <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-black ${
+                        occupancyFilter === tab.id ? 'bg-white/20 text-white' : 'bg-stone-200 text-stone-700'
+                      }`}>
+                        {tab.count}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* View 1: Shot View / Snapshot Cards */}
+              {occupancyViewMode === 'cards' && (
+                <div className="p-5 bg-stone-50/50">
+                  {filteredOccupancy.length > 0 ? (
+                    <div className={`grid grid-cols-1 md:grid-cols-2 ${isStandalone ? "lg:grid-cols-3 xl:grid-cols-4" : ""} gap-4`}>
+                      {filteredOccupancy.map((o) => (
+                        <div
+                          key={o.id}
+                          className={`bg-white rounded-2xl border-2 p-4 transition-all hover:shadow-lg relative overflow-hidden flex flex-col justify-between ${
+                            o.isDueToday
+                              ? 'border-amber-400/80 bg-gradient-to-br from-amber-50/40 via-white to-white'
+                              : 'border-stone-200 hover:border-brand-300'
+                          }`}
+                        >
+                          {/* Top Badge Row: Shot View Number + Room Number + Status */}
+                          <div>
+                            <div className="flex items-center justify-between gap-2 mb-3">
+                              <div className="flex items-center gap-2">
+                                {/* Shot View Number Badge */}
+                                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-gradient-to-r from-stone-900 to-stone-800 text-amber-400 font-mono font-black text-xs shadow-xs border border-stone-700">
+                                  <i className="fa-solid fa-camera text-[10px] text-amber-400"></i>
+                                  <span>SHOT {o.shotNumber}</span>
+                                </div>
+
+                                {/* Room Number Badge */}
+                                <div className="inline-flex items-center gap-1 px-3 py-1 rounded-xl bg-brand-50 border border-brand-200 text-brand-800 font-black text-xs">
+                                  <i className="fa-solid fa-door-closed text-brand-600"></i>
+                                  <span>{String(o.roomName || o.roomId || 'Room 101').startsWith('Room') ? (o.roomName || o.roomId) : `Room ${o.roomName || o.roomId || '101'}`}</span>
+                                </div>
+                              </div>
+
+                              {/* Floor & Bed Pill */}
+                              <span className="text-[11px] font-bold text-stone-500 bg-stone-100 px-2 py-0.5 rounded-lg">
+                                Fl. {o.roomFloor} • {o.roomCategory}
+                              </span>
+                            </div>
+
+                            {/* Guest Details */}
+                            <div className="flex items-start gap-3 mb-3">
+                              <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-brand-600 to-amber-500 text-white font-black text-sm flex items-center justify-center shrink-0 shadow-xs uppercase">
+                                {(o.guestName || 'G').slice(0, 2)}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <h4 className="font-bold text-stone-900 text-sm truncate">
+                                    {o.guestName}
+                                  </h4>
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
+                                    o.isKhmer
+                                      ? 'bg-rose-50 border-rose-200 text-rose-700'
+                                      : 'bg-blue-50 border-blue-200 text-blue-700'
+                                  }`}>
+                                    {o.isKhmer ? '🇰🇭 Cambodian' : `🌐 ${o.guestNationality || 'Foreign'}`}
+                                  </span>
+                                  {o.isMultiRoom && (
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-indigo-50 border border-indigo-200 text-indigo-700 flex items-center gap-1">
+                                      <i className="fa-solid fa-hotel text-[9px]"></i>
+                                      <span>{o.relatedStays.length} Rooms</span>
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Multi-room linked rooms badge */}
+                                {o.isMultiRoom && (
+                                  <div className="mt-1 text-[11px] font-bold text-indigo-700 bg-indigo-50/70 border border-indigo-100 rounded-lg px-2 py-0.5 inline-flex items-center gap-1.5">
+                                    <i className="fa-solid fa-layer-group text-indigo-500 text-[10px]"></i>
+                                    <span>Rooms: {o.relatedStays.map(s => s.roomName || s.roomId).join(', ')}</span>
+                                  </div>
+                                )}
+
+                                {/* Passport / ID Badge with Copy Button */}
+                                <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+                                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-stone-100 hover:bg-stone-200/80 border border-stone-200 rounded-lg text-xs font-mono text-stone-800 transition">
+                                    <i className="fa-solid fa-id-card text-stone-500 text-[11px]"></i>
+                                    <span className="font-bold">
+                                      {o.passport ? o.passport : <span className="text-stone-400 italic font-sans text-[11px]">No ID recorded</span>}
+                                    </span>
+                                    {o.passport && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          copyText(o.passport, `card-id-${o.id}`);
+                                        }}
+                                        className="ml-1 text-stone-400 hover:text-brand-600 transition cursor-pointer"
+                                        title="Copy Passport / ID Number"
+                                      >
+                                        <i className={`fa-solid ${copiedId === `card-id-${o.id}` ? 'fa-check text-emerald-600' : 'fa-copy'}`}></i>
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  {/* Phone */}
+                                  {o.guestPhone && (
+                                    <a
+                                      href={`tel:${o.guestPhone}`}
+                                      className="inline-flex items-center gap-1 text-xs text-stone-600 hover:text-brand-700 font-mono bg-stone-50 px-2 py-1 rounded-lg border border-stone-200/70"
+                                      title="Call Guest"
+                                    >
+                                      <i className="fa-solid fa-phone text-[10px] text-emerald-600"></i>
+                                      <span>{o.guestPhone}</span>
+                                    </a>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Stay Schedule Box */}
+                            <div className="bg-stone-50 border border-stone-200/80 rounded-xl p-2.5 mb-3 grid grid-cols-2 gap-2 text-xs">
+                              <div>
+                                <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block">Check-in</span>
+                                <span className="font-bold text-stone-800 flex items-center gap-1 mt-0.5">
+                                  <i className="fa-regular fa-calendar text-emerald-600 text-[11px]"></i>
+                                  {o.checkInDate}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block">Check-out</span>
+                                <span className={`font-bold flex items-center gap-1 mt-0.5 ${
+                                  o.isDueToday ? 'text-amber-700 font-black' : 'text-stone-800'
+                                }`}>
+                                  <i className="fa-regular fa-calendar-check text-amber-600 text-[11px]"></i>
+                                  {o.checkOutDate || 'Open'}
+                                  {o.isDueToday && (
+                                    <span className="px-1.5 py-0.2 bg-amber-500 text-white rounded text-[9px] font-black uppercase">Today</span>
+                                  )}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Notes if any */}
+                            {o.notes && (
+                              <p className="text-[11px] text-stone-500 italic bg-amber-50/60 border border-amber-100 rounded-lg px-2.5 py-1.5 mb-3 line-clamp-2">
+                                <i className="fa-solid fa-note-sticky text-amber-500 mr-1"></i>
+                                {o.notes}
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Action Footer */}
+                          <div className="pt-3 border-t border-stone-100 flex items-center justify-between gap-2 mt-auto">
+                            <div className="text-[10px] font-mono text-stone-400 font-bold">
+                              {o.secCode}
+                            </div>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openEditOccupancy(o);
+                                }}
+                                className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                                title="Edit Guest Info, Price & Dates (កែប្រែព័ត៌មាន)"
+                              >
+                                <i className="fa-solid fa-pen-to-square text-indigo-600 text-xs"></i>
+                                <span>Edit</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setInvoiceModalGuest(o);
+                                  setInvoiceModalRelated(o.relatedStays || [o]);
+                                }}
+                                className="px-2.5 py-1.5 bg-brand-50 hover:bg-brand-100 text-brand-800 border border-brand-200 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                                title="Print Official Guest Invoice / Folio"
+                              >
+                                <i className="fa-solid fa-file-invoice text-brand-600 text-xs"></i>
+                                <span>Invoice</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCheckInForm(prev => ({
+                                    ...prev,
+                                    guestName: o.guestName || '',
+                                    guestPhone: o.guestPhone || '',
+                                    guestNationality: o.guestNationality || '',
+                                    passportOrId: o.passport || o.passportOrId || '',
+                                    notes: `Additional room for ${o.guestName}`
+                                  }));
+                                  window.scrollTo({ top: 300, behavior: 'smooth' });
+                                }}
+                                className="px-2 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs border border-stone-200"
+                                title="Add another room for this guest"
+                              >
+                                <i className="fa-solid fa-plus text-emerald-600 text-xs"></i>
+                                <span>+ Room</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedSecurityGuest(o)}
+                                className="px-2.5 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-800 text-xs font-bold rounded-xl transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                                title="Open Guest Security Snapshot Card"
+                              >
+                                <i className="fa-solid fa-eye text-brand-600 text-xs"></i>
+                                <span>Shot</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleCheckOut(o)}
+                                className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                                title="Check Out Guest (View Details & Settle)"
+                              >
+                                <i className="fa-solid fa-right-from-bracket text-amber-600 text-xs"></i>
+                                <span>Out</span>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="py-12 text-center bg-white rounded-2xl border border-stone-200 p-8">
+                      <div className="w-14 h-14 mx-auto rounded-full bg-stone-100 flex items-center justify-center text-stone-400 text-2xl mb-3">
+                        <i className="fa-solid fa-user-xmark"></i>
+                      </div>
+                      <h4 className="font-bold text-stone-800 text-sm">No Active Checked-in Guests Found</h4>
+                      <p className="text-xs text-stone-400 mt-1 max-w-sm mx-auto">
+                        {occupancySearch || occupancyFilter !== 'all'
+                          ? 'Try adjusting your search query or filter tab to view guests.'
+                          : 'There are currently no guests checked in. Use the form on the left to check in a guest.'}
+                      </p>
+                      {(occupancySearch || occupancyFilter !== 'all') && (
+                        <button
+                          type="button"
+                          onClick={() => { setOccupancySearch(''); setOccupancyFilter('all'); }}
+                          className="mt-3 px-3 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-bold rounded-xl transition cursor-pointer"
+                        >
+                          Reset Filters
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* View 2: Easy Table View */}
+              {occupancyViewMode === 'table' && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-left">
+                    <thead className="bg-stone-100/80 border-b border-stone-200 text-[11px] text-stone-600 uppercase tracking-wider font-bold">
+                      <tr>
+                        <th className="px-4 py-3">Shot #</th>
+                        <th className="px-4 py-3">Room</th>
+                        <th className="px-4 py-3">Guest Name & Nationality</th>
+                        <th className="px-4 py-3">Passport / ID Number</th>
+                        <th className="px-4 py-3">Phone</th>
+                        <th className="px-4 py-3">Check-in</th>
+                        <th className="px-4 py-3">Check-out</th>
+                        <th className="px-4 py-3">Security Status</th>
+                        <th className="px-4 py-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100">
+                      {filteredOccupancy.map((o) => (
+                        <tr
+                          key={o.id}
+                          className={`hover:bg-amber-50/40 transition-colors ${
+                            o.isDueToday ? 'bg-amber-50/20' : ''
+                          }`}
+                        >
+                          {/* Shot View Number */}
+                          <td className="px-4 py-3.5">
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-stone-900 text-amber-400 font-mono font-black text-xs shadow-2xs">
+                              {o.shotNumber}
+                            </span>
+                          </td>
+
+                          {/* Room Number */}
+                          <td className="px-4 py-3.5">
+                            <div className="flex flex-col">
+                              <span className="font-black text-brand-700 text-sm">
+                                Room {o.roomName || o.roomId}
+                              </span>
+                              <span className="text-[10px] text-stone-500">
+                                Fl. {o.roomFloor} • {o.roomCategory}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Guest Name & Nationality */}
+                          <td className="px-4 py-3.5">
+                            <p className="font-bold text-stone-900 text-sm">{o.guestName}</p>
+                            <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                              <span className={`inline-block text-[10px] font-bold px-1.5 py-0.2 rounded border ${
+                                o.isKhmer
+                                  ? 'bg-rose-50 border-rose-200 text-rose-700'
+                                  : 'bg-blue-50 border-blue-200 text-blue-700'
+                              }`}>
+                                {o.isKhmer ? '🇰🇭 Cambodian' : `🌐 ${o.guestNationality || 'Foreign'}`}
+                              </span>
+                              {o.isMultiRoom && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.2 rounded bg-indigo-50 border border-indigo-200 text-indigo-700" title={`Rooms: ${o.relatedStays.map(s => s.roomName || s.roomId).join(', ')}`}>
+                                  <i className="fa-solid fa-hotel text-[9px]"></i>
+                                  {o.relatedStays.length} Rooms
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Passport / National ID */}
+                          <td className="px-4 py-3.5">
+                            {o.passport ? (
+                              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-stone-100 hover:bg-stone-200 rounded-lg text-xs font-mono text-stone-800 transition">
+                                <i className="fa-solid fa-id-card text-stone-400 text-xs"></i>
+                                <span>{o.passport}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => copyText(o.passport, `tbl-id-${o.id}`)}
+                                  className="text-stone-400 hover:text-brand-600 transition ml-1 cursor-pointer"
+                                  title="Copy ID"
+                                >
+                                  <i className={`fa-solid ${copiedId === `tbl-id-${o.id}` ? 'fa-check text-emerald-600' : 'fa-copy'}`}></i>
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-stone-400 text-xs italic">None recorded</span>
+                            )}
+                          </td>
+
+                          {/* Phone */}
+                          <td className="px-4 py-3.5 font-mono text-xs text-stone-700">
+                            {o.guestPhone ? (
+                              <a href={`tel:${o.guestPhone}`} className="hover:text-brand-600 transition flex items-center gap-1">
+                                <i className="fa-solid fa-phone text-[10px] text-emerald-600"></i>
+                                {o.guestPhone}
+                              </a>
+                            ) : '—'}
+                          </td>
+
+                          {/* Check-in */}
+                          <td className="px-4 py-3.5 text-xs text-stone-700 font-medium">
+                            {o.checkInDate}
+                          </td>
+
+                          {/* Check-out */}
+                          <td className="px-4 py-3.5 text-xs">
+                            <span className={`font-bold ${o.isDueToday ? 'text-amber-700 font-black' : 'text-stone-800'}`}>
+                              {o.checkOutDate || 'Open'}
+                            </span>
+                            {o.isDueToday && (
+                              <span className="ml-1.5 px-1.5 py-0.2 bg-amber-500 text-white rounded text-[9px] font-black uppercase">
+                                Due Today
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Security Status */}
+                          <td className="px-4 py-3.5">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-bold">
+                              <i className="fa-solid fa-circle-check text-emerald-500 text-[9px]"></i>
+                              Verified In-House
+                            </span>
+                          </td>
+
+                          {/* Actions */}
+                          <td className="px-4 py-3.5 text-right whitespace-nowrap">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openEditOccupancy(o);
+                                }}
+                                className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold rounded-xl transition shadow-2xs cursor-pointer"
+                                title="Edit Guest Info, Price & Dates (កែប្រែព័ត៌មាន)"
+                              >
+                                <i className="fa-solid fa-pen-to-square text-indigo-600 mr-1"></i>
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setInvoiceModalGuest(o);
+                                  setInvoiceModalRelated(o.relatedStays || [o]);
+                                }}
+                                className="px-2.5 py-1.5 bg-brand-50 hover:bg-brand-100 text-brand-700 border border-brand-200 text-xs font-bold rounded-xl transition shadow-2xs cursor-pointer"
+                                title="Print Official Guest Invoice / Folio"
+                              >
+                                <i className="fa-solid fa-file-invoice text-brand-600 mr-1"></i>
+                                Invoice
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCheckInForm(prev => ({
+                                    ...prev,
+                                    guestName: o.guestName || '',
+                                    guestPhone: o.guestPhone || '',
+                                    guestNationality: o.guestNationality || '',
+                                    passportOrId: o.passport || o.passportOrId || '',
+                                    notes: `Additional room for ${o.guestName}`
+                                  }));
+                                  window.scrollTo({ top: 300, behavior: 'smooth' });
+                                }}
+                                className="px-2 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 border border-stone-200 text-xs font-bold rounded-xl transition shadow-2xs cursor-pointer"
+                                title="Add another room for this guest"
+                              >
+                                <i className="fa-solid fa-plus text-emerald-600 mr-1"></i>
+                                + Room
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedSecurityGuest(o)}
+                                className="px-2.5 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-bold rounded-xl transition shadow-2xs cursor-pointer"
+                                title="View Security Shot Snapshot"
+                              >
+                                <i className="fa-solid fa-eye text-brand-600 mr-1"></i>
+                                Shot
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleCheckOut(o)}
+                                className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-xl text-xs font-bold transition shadow-2xs cursor-pointer"
+                                title="Check Out Guest (View Details & Settle)"
+                              >
+                                <i className="fa-solid fa-right-from-bracket mr-1"></i>
+                                Out
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+
+                      {filteredOccupancy.length === 0 && (
+                        <tr>
+                          <td colSpan="9" className="py-12 text-center text-stone-400 bg-white">
+                            <i className="fa-solid fa-user-xmark text-2xl mb-2 block text-stone-300"></i>
+                            No active checked-in guests found matching your criteria.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+  );
+
   return (
     <div className="space-y-6">
-      {/* ── Sub navigation switch ── */}
-      <div className="flex flex-wrap items-center justify-between gap-3 p-1.5 bg-stone-200/70 rounded-2xl w-full">
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setSubSection('rooms')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
-              subSection === 'rooms' ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-600 hover:text-stone-900'
-            }`}
-          >
-            <i className="fa-solid fa-door-open text-brand-500 text-sm"></i>
-            <span>Rooms Catalog & Detail (បញ្ជីបន្ទប់ និងព័ត៌មានលម្អិត)</span>
-            <span className="ml-1 px-2 py-0.5 rounded-full bg-stone-100 text-stone-700 text-[10px] font-mono">
-              {rooms.length}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setSubSection('categories')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
-              subSection === 'categories' ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-600 hover:text-stone-900'
-            }`}
-          >
-            <i className="fa-solid fa-layer-group text-indigo-500 text-sm"></i>
-            <span>Bed Categories (ប្រភេទគ្រែ / Category Bed)</span>
-            <span className="ml-1 px-2 py-0.5 rounded-full bg-stone-100 text-stone-700 text-[10px] font-mono">
-              {bedCategories.length}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setSubSection('bookings')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
-              subSection === 'bookings' ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-600 hover:text-stone-900'
-            }`}
-          >
-            <i className="fa-solid fa-calendar-check text-indigo-600 text-sm"></i>
-            <span>Room Bookings (ការកក់បន្ទប់អតិថិជន)</span>
-            <span className="ml-1 px-2 py-0.5 rounded-full bg-stone-100 text-stone-700 text-[10px] font-mono">
-              {bookings.filter(b => b.type === 'room' || b.roomId || String(b.itemName || '').toLowerCase().includes('room')).length}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setSubSection('occupancy')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
-              subSection === 'occupancy' ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-600 hover:text-stone-900'
-            }`}
-          >
-            <i className="fa-solid fa-bed text-emerald-500 text-sm"></i>
-            <span>Check-in & Occupancy (ការកក់ និង Check-in)</span>
-            <span className="ml-1 px-2 py-0.5 rounded-full bg-stone-100 text-stone-700 text-[10px] font-mono">
-              {activeOccupancy.length} active
-            </span>
-          </button>
-        </div>
-
-        {/* Quick stat summary pills */}
-        <div className="hidden lg:flex items-center gap-2 px-3 py-1 bg-white/70 rounded-xl text-xs text-stone-600">
-          <span className="flex items-center gap-1 font-bold text-emerald-700">
-            <i className="fa-solid fa-circle text-[8px] text-emerald-500"></i>
-            {rooms.filter(r => r.status === 'vacant').length} Vacant
-          </span>
-          <span className="text-stone-300">|</span>
-          <span className="flex items-center gap-1 font-bold text-blue-700">
-            <i className="fa-solid fa-circle text-[8px] text-blue-500"></i>
-            {rooms.filter(r => r.status === 'occupied').length} Occupied
-          </span>
-          <span className="text-stone-300">|</span>
-          <span className="flex items-center gap-1 font-bold text-amber-700">
-            <i className="fa-solid fa-circle text-[8px] text-amber-500"></i>
-            {rooms.filter(r => r.status === 'cleaning').length} Cleaning
-          </span>
-        </div>
-
-        {/* Print & Alert to Telegram Actions */}
-        <div className="flex items-center gap-1.5 ml-auto">
-          <button
-            type="button"
-            onClick={() => window.print()}
-            className="px-3 py-2 bg-white hover:bg-stone-100 border border-stone-200 text-stone-700 text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
-            title="បោះពុម្ពបញ្ជីបន្ទប់ (Print Rooms)"
-          >
-            <i className="fa-solid fa-print text-stone-600"></i>
-            <span>Print</span>
-          </button>
-          <button
-            type="button"
-            onClick={handleRoomsTelegramAlert}
-            disabled={tgSending || localTgSending}
-            className="px-3 py-2 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-2xs disabled:opacity-50 cursor-pointer"
-            title="ផ្ញើស្ថានភាពបន្ទប់ទៅ Telegram"
-          >
-            <i className="fa-brands fa-telegram text-sky-500"></i>
-            <span>Alert Telegram</span>
-          </button>
-        </div>
-      </div>
-
       {/* Printable Report Header */}
       <div className="print-only mb-4 p-4 border-b border-stone-300">
         <h2 className="text-xl font-bold">Motorental Siemreab Angkor & Guesthouse</h2>
@@ -1729,6 +2246,25 @@ export default function RoomsTab({
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => window.print()}
+                      className="px-3 py-1.5 bg-white hover:bg-stone-100 border border-stone-200 text-stone-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                      title="បោះពុម្ពបញ្ជីបន្ទប់ (Print Rooms)"
+                    >
+                      <i className="fa-solid fa-print text-stone-600"></i>
+                      <span>Print</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRoomsTelegramAlert}
+                      disabled={tgSending || localTgSending}
+                      className="px-3 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 text-xs font-bold rounded-lg transition flex items-center gap-1.5 shadow-2xs disabled:opacity-50 cursor-pointer"
+                      title="ផ្ញើស្ថានភាពបន្ទប់ទៅ Telegram"
+                    >
+                      <i className="fa-brands fa-telegram text-sky-500"></i>
+                      <span>Alert Telegram</span>
+                    </button>
                     <select
                       value={roomSortBy}
                       onChange={e => setRoomSortBy(e.target.value)}
@@ -2564,611 +3100,16 @@ export default function RoomsTab({
             {/* ───────────────────────────────────────────────────────────── */}
             {/* ACTIVE CHECKED-IN GUESTS (EASY VIEW & SHOT VIEW NUMBERS)      */}
             {/* ───────────────────────────────────────────────────────────── */}
-            <div className={`${cardCls} overflow-hidden border-2 border-stone-200 shadow-sm`}>
-              {/* Header with Title, Badges, Security Action and View Switcher */}
-              <div className="p-5 bg-gradient-to-r from-stone-900 via-stone-850 to-stone-900 text-white flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 text-lg shadow-inner">
-                    <i className="fa-solid fa-user-shield"></i>
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-black text-white text-base tracking-wide">
-                        Active Checked-in Guests (ភ្ញៀវកំពុងស្នាក់នៅ)
-                      </h3>
-                      <span className="px-2 py-0.5 rounded-full bg-emerald-500 text-white font-mono font-black text-xs shadow-xs">
-                        {occupancyStats.total}
-                      </span>
-                    </div>
-                    <p className="text-xs text-stone-300">
-                      Real-time in-house guests • Shot View numbers & security verification
-                    </p>
-                  </div>
-                </div>
-
-                {/* Security Database Request and Quick Action Buttons */}
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowSecurityManifestModal(true)}
-                    className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold rounded-xl transition-all shadow-md hover:shadow-lg flex items-center gap-2 cursor-pointer active:scale-95"
-                    title="បើកផ្ទាំងទិន្នន័យស្នើសុំសន្តិសុខ / Security Database Request Manifest"
-                  >
-                    <i className="fa-solid fa-shield-halved text-emerald-200 text-sm"></i>
-                    <span>Security Database Request</span>
-                    <span className="px-1.5 py-0.5 bg-black/20 rounded-md text-[10px] font-black">
-                      {occupancyStats.total}
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const text = generateSecurityManifestText();
-                      copyText(text, 'manifest-quick');
-                      showModal('success', 'Copied to Clipboard', 'Guest security manifest copied. Ready to paste into Telegram or Police report.');
-                    }}
-                    className="px-3 py-2 bg-white/10 hover:bg-white/20 text-stone-200 hover:text-white border border-white/20 text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                    title="Copy formatted security manifest text"
-                  >
-                    <i className="fa-solid fa-copy text-amber-400 text-xs"></i>
-                    <span>{copiedId === 'manifest-quick' ? 'Copied!' : 'Copy Data'}</span>
-                  </button>
-
-                  {/* View Mode Switcher: Shot Cards vs Table */}
-                  <div className="bg-black/30 p-1 rounded-xl border border-white/10 flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setOccupancyViewMode('cards')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
-                        occupancyViewMode === 'cards'
-                          ? 'bg-amber-500 text-stone-950 shadow-sm'
-                          : 'text-stone-300 hover:text-white'
-                      }`}
-                      title="Shot View / Compact Cards with Large Numbers"
-                    >
-                      <i className="fa-solid fa-camera text-[11px]"></i>
-                      <span className="hidden sm:inline">Shot View</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setOccupancyViewMode('table')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
-                        occupancyViewMode === 'table'
-                          ? 'bg-amber-500 text-stone-950 shadow-sm'
-                          : 'text-stone-300 hover:text-white'
-                      }`}
-                      title="Easy Table List View"
-                    >
-                      <i className="fa-solid fa-table text-[11px]"></i>
-                      <span className="hidden sm:inline">Table View</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Quick Summary Pill Bar */}
-              <div className="px-5 py-3 bg-stone-100 border-b border-stone-200 flex flex-wrap items-center justify-between gap-2 text-xs">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-stone-200 rounded-lg font-bold text-stone-700 shadow-2xs">
-                    <i className="fa-solid fa-users text-brand-600 text-xs"></i>
-                    <span>In-House: <strong className="text-stone-900">{occupancyStats.total} Guests</strong></span>
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-stone-200 rounded-lg font-bold text-stone-700 shadow-2xs">
-                    <i className="fa-solid fa-door-open text-indigo-600 text-xs"></i>
-                    <span>Rooms: <strong className="text-stone-900">{occupancyStats.occupiedRoomsCount} In-Use</strong></span>
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-stone-200 rounded-lg font-bold text-stone-700 shadow-2xs">
-                    <i className="fa-solid fa-earth-americas text-blue-600 text-xs"></i>
-                    <span>Foreign: <strong className="text-blue-700">{occupancyStats.foreign}</strong></span>
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-stone-200 rounded-lg font-bold text-stone-700 shadow-2xs">
-                    <i className="fa-solid fa-flag text-rose-600 text-xs"></i>
-                    <span>Khmer: <strong className="text-rose-700">{occupancyStats.khmer}</strong></span>
-                  </span>
-                  {occupancyStats.dueToday > 0 && (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-100 border border-amber-300 text-amber-900 rounded-lg font-bold animate-pulse shadow-2xs">
-                      <i className="fa-solid fa-bell text-amber-600 text-xs"></i>
-                      <span>Due Out Today: <strong>{occupancyStats.dueToday}</strong></span>
-                    </span>
-                  )}
-                </div>
-
-                <div className="text-[11px] text-stone-500 font-medium">
-                  Showing {filteredOccupancy.length} of {occupancyStats.total} active stays
-                </div>
-              </div>
-
-              {/* Search & Filter Toolbar */}
-              <div className="p-4 bg-white border-b border-stone-100 flex flex-wrap items-center justify-between gap-3">
-                <div className="relative flex-1 min-w-[220px] max-w-md">
-                  <i className="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400 text-xs"></i>
-                  <input
-                    type="text"
-                    value={occupancySearch}
-                    onChange={e => setOccupancySearch(e.target.value)}
-                    placeholder="Search guest name, room #, passport/ID, phone..."
-                    className="w-full pl-9 pr-8 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs font-medium text-stone-800 placeholder-stone-400 focus:bg-white focus:border-brand-500 focus:ring-2 focus:ring-brand-100 outline-none transition"
-                  />
-                  {occupancySearch && (
-                    <button
-                      type="button"
-                      onClick={() => setOccupancySearch('')}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 text-xs"
-                    >
-                      ✕
-                    </button>
-                  )}
-                </div>
-
-                <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                  {[
-                    { id: 'all', label: 'All Active', count: occupancyStats.total },
-                    { id: 'due-today', label: 'Due Checkout Today', count: occupancyStats.dueToday },
-                    { id: 'foreign', label: 'Foreign Guests', count: occupancyStats.foreign },
-                    { id: 'khmer', label: 'Cambodian', count: occupancyStats.khmer }
-                  ].map(tab => (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      onClick={() => setOccupancyFilter(tab.id)}
-                      className={`px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1.5 cursor-pointer ${
-                        occupancyFilter === tab.id
-                          ? 'bg-stone-900 text-white shadow-xs'
-                          : 'bg-stone-100 hover:bg-stone-200 text-stone-700'
-                      }`}
-                    >
-                      <span>{tab.label}</span>
-                      <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-black ${
-                        occupancyFilter === tab.id ? 'bg-white/20 text-white' : 'bg-stone-200 text-stone-700'
-                      }`}>
-                        {tab.count}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* View 1: Shot View / Snapshot Cards */}
-              {occupancyViewMode === 'cards' && (
-                <div className="p-5 bg-stone-50/50">
-                  {filteredOccupancy.length > 0 ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {filteredOccupancy.map((o) => (
-                        <div
-                          key={o.id}
-                          className={`bg-white rounded-2xl border-2 p-4 transition-all hover:shadow-lg relative overflow-hidden flex flex-col justify-between ${
-                            o.isDueToday
-                              ? 'border-amber-400/80 bg-gradient-to-br from-amber-50/40 via-white to-white'
-                              : 'border-stone-200 hover:border-brand-300'
-                          }`}
-                        >
-                          {/* Top Badge Row: Shot View Number + Room Number + Status */}
-                          <div>
-                            <div className="flex items-center justify-between gap-2 mb-3">
-                              <div className="flex items-center gap-2">
-                                {/* Shot View Number Badge */}
-                                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-gradient-to-r from-stone-900 to-stone-800 text-amber-400 font-mono font-black text-xs shadow-xs border border-stone-700">
-                                  <i className="fa-solid fa-camera text-[10px] text-amber-400"></i>
-                                  <span>SHOT {o.shotNumber}</span>
-                                </div>
-
-                                {/* Room Number Badge */}
-                                <div className="inline-flex items-center gap-1 px-3 py-1 rounded-xl bg-brand-50 border border-brand-200 text-brand-800 font-black text-xs">
-                                  <i className="fa-solid fa-door-closed text-brand-600"></i>
-                                  <span>{String(o.roomName || o.roomId || 'Room 101').startsWith('Room') ? (o.roomName || o.roomId) : `Room ${o.roomName || o.roomId || '101'}`}</span>
-                                </div>
-                              </div>
-
-                              {/* Floor & Bed Pill */}
-                              <span className="text-[11px] font-bold text-stone-500 bg-stone-100 px-2 py-0.5 rounded-lg">
-                                Fl. {o.roomFloor} • {o.roomCategory}
-                              </span>
-                            </div>
-
-                            {/* Guest Details */}
-                            <div className="flex items-start gap-3 mb-3">
-                              <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-brand-600 to-amber-500 text-white font-black text-sm flex items-center justify-center shrink-0 shadow-xs uppercase">
-                                {(o.guestName || 'G').slice(0, 2)}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <h4 className="font-bold text-stone-900 text-sm truncate">
-                                    {o.guestName}
-                                  </h4>
-                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
-                                    o.isKhmer
-                                      ? 'bg-rose-50 border-rose-200 text-rose-700'
-                                      : 'bg-blue-50 border-blue-200 text-blue-700'
-                                  }`}>
-                                    {o.isKhmer ? '🇰🇭 Cambodian' : `🌐 ${o.guestNationality || 'Foreign'}`}
-                                  </span>
-                                  {o.isMultiRoom && (
-                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-indigo-50 border border-indigo-200 text-indigo-700 flex items-center gap-1">
-                                      <i className="fa-solid fa-hotel text-[9px]"></i>
-                                      <span>{o.relatedStays.length} Rooms</span>
-                                    </span>
-                                  )}
-                                </div>
-
-                                {/* Multi-room linked rooms badge */}
-                                {o.isMultiRoom && (
-                                  <div className="mt-1 text-[11px] font-bold text-indigo-700 bg-indigo-50/70 border border-indigo-100 rounded-lg px-2 py-0.5 inline-flex items-center gap-1.5">
-                                    <i className="fa-solid fa-layer-group text-indigo-500 text-[10px]"></i>
-                                    <span>Rooms: {o.relatedStays.map(s => s.roomName || s.roomId).join(', ')}</span>
-                                  </div>
-                                )}
-
-                                {/* Passport / ID Badge with Copy Button */}
-                                <div className="mt-1.5 flex items-center gap-2 flex-wrap">
-                                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-stone-100 hover:bg-stone-200/80 border border-stone-200 rounded-lg text-xs font-mono text-stone-800 transition">
-                                    <i className="fa-solid fa-id-card text-stone-500 text-[11px]"></i>
-                                    <span className="font-bold">
-                                      {o.passport ? o.passport : <span className="text-stone-400 italic font-sans text-[11px]">No ID recorded</span>}
-                                    </span>
-                                    {o.passport && (
-                                      <button
-                                        type="button"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          copyText(o.passport, `card-id-${o.id}`);
-                                        }}
-                                        className="ml-1 text-stone-400 hover:text-brand-600 transition cursor-pointer"
-                                        title="Copy Passport / ID Number"
-                                      >
-                                        <i className={`fa-solid ${copiedId === `card-id-${o.id}` ? 'fa-check text-emerald-600' : 'fa-copy'}`}></i>
-                                      </button>
-                                    )}
-                                  </div>
-
-                                  {/* Phone */}
-                                  {o.guestPhone && (
-                                    <a
-                                      href={`tel:${o.guestPhone}`}
-                                      className="inline-flex items-center gap-1 text-xs text-stone-600 hover:text-brand-700 font-mono bg-stone-50 px-2 py-1 rounded-lg border border-stone-200/70"
-                                      title="Call Guest"
-                                    >
-                                      <i className="fa-solid fa-phone text-[10px] text-emerald-600"></i>
-                                      <span>{o.guestPhone}</span>
-                                    </a>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Stay Schedule Box */}
-                            <div className="bg-stone-50 border border-stone-200/80 rounded-xl p-2.5 mb-3 grid grid-cols-2 gap-2 text-xs">
-                              <div>
-                                <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block">Check-in</span>
-                                <span className="font-bold text-stone-800 flex items-center gap-1 mt-0.5">
-                                  <i className="fa-regular fa-calendar text-emerald-600 text-[11px]"></i>
-                                  {o.checkInDate}
-                                </span>
-                              </div>
-                              <div>
-                                <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block">Check-out</span>
-                                <span className={`font-bold flex items-center gap-1 mt-0.5 ${
-                                  o.isDueToday ? 'text-amber-700 font-black' : 'text-stone-800'
-                                }`}>
-                                  <i className="fa-regular fa-calendar-check text-amber-600 text-[11px]"></i>
-                                  {o.checkOutDate || 'Open'}
-                                  {o.isDueToday && (
-                                    <span className="px-1.5 py-0.2 bg-amber-500 text-white rounded text-[9px] font-black uppercase">Today</span>
-                                  )}
-                                </span>
-                              </div>
-                            </div>
-
-                            {/* Notes if any */}
-                            {o.notes && (
-                              <p className="text-[11px] text-stone-500 italic bg-amber-50/60 border border-amber-100 rounded-lg px-2.5 py-1.5 mb-3 line-clamp-2">
-                                <i className="fa-solid fa-note-sticky text-amber-500 mr-1"></i>
-                                {o.notes}
-                              </p>
-                            )}
-                          </div>
-
-                          {/* Action Footer */}
-                          <div className="pt-3 border-t border-stone-100 flex items-center justify-between gap-2 mt-auto">
-                            <div className="text-[10px] font-mono text-stone-400 font-bold">
-                              {o.secCode}
-                            </div>
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  openEditOccupancy(o);
-                                }}
-                                className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
-                                title="Edit Guest Info, Price & Dates (កែប្រែព័ត៌មាន)"
-                              >
-                                <i className="fa-solid fa-pen-to-square text-indigo-600 text-xs"></i>
-                                <span>Edit</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setInvoiceModalGuest(o);
-                                  setInvoiceModalRelated(o.relatedStays || [o]);
-                                }}
-                                className="px-2.5 py-1.5 bg-brand-50 hover:bg-brand-100 text-brand-800 border border-brand-200 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
-                                title="Print Official Guest Invoice / Folio"
-                              >
-                                <i className="fa-solid fa-file-invoice text-brand-600 text-xs"></i>
-                                <span>Invoice</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setCheckInForm(prev => ({
-                                    ...prev,
-                                    guestName: o.guestName || '',
-                                    guestPhone: o.guestPhone || '',
-                                    guestNationality: o.guestNationality || '',
-                                    passportOrId: o.passport || o.passportOrId || '',
-                                    notes: `Additional room for ${o.guestName}`
-                                  }));
-                                  window.scrollTo({ top: 300, behavior: 'smooth' });
-                                }}
-                                className="px-2 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs border border-stone-200"
-                                title="Add another room for this guest"
-                              >
-                                <i className="fa-solid fa-plus text-emerald-600 text-xs"></i>
-                                <span>+ Room</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setSelectedSecurityGuest(o)}
-                                className="px-2.5 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-800 text-xs font-bold rounded-xl transition flex items-center gap-1 cursor-pointer shadow-2xs"
-                                title="Open Guest Security Snapshot Card"
-                              >
-                                <i className="fa-solid fa-eye text-brand-600 text-xs"></i>
-                                <span>Shot</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleCheckOut(o)}
-                                className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
-                                title="Check Out Guest (View Details & Settle)"
-                              >
-                                <i className="fa-solid fa-right-from-bracket text-amber-600 text-xs"></i>
-                                <span>Out</span>
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="py-12 text-center bg-white rounded-2xl border border-stone-200 p-8">
-                      <div className="w-14 h-14 mx-auto rounded-full bg-stone-100 flex items-center justify-center text-stone-400 text-2xl mb-3">
-                        <i className="fa-solid fa-user-xmark"></i>
-                      </div>
-                      <h4 className="font-bold text-stone-800 text-sm">No Active Checked-in Guests Found</h4>
-                      <p className="text-xs text-stone-400 mt-1 max-w-sm mx-auto">
-                        {occupancySearch || occupancyFilter !== 'all'
-                          ? 'Try adjusting your search query or filter tab to view guests.'
-                          : 'There are currently no guests checked in. Use the form on the left to check in a guest.'}
-                      </p>
-                      {(occupancySearch || occupancyFilter !== 'all') && (
-                        <button
-                          type="button"
-                          onClick={() => { setOccupancySearch(''); setOccupancyFilter('all'); }}
-                          className="mt-3 px-3 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-bold rounded-xl transition cursor-pointer"
-                        >
-                          Reset Filters
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* View 2: Easy Table View */}
-              {occupancyViewMode === 'table' && (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm text-left">
-                    <thead className="bg-stone-100/80 border-b border-stone-200 text-[11px] text-stone-600 uppercase tracking-wider font-bold">
-                      <tr>
-                        <th className="px-4 py-3">Shot #</th>
-                        <th className="px-4 py-3">Room</th>
-                        <th className="px-4 py-3">Guest Name & Nationality</th>
-                        <th className="px-4 py-3">Passport / ID Number</th>
-                        <th className="px-4 py-3">Phone</th>
-                        <th className="px-4 py-3">Check-in</th>
-                        <th className="px-4 py-3">Check-out</th>
-                        <th className="px-4 py-3">Security Status</th>
-                        <th className="px-4 py-3 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-stone-100">
-                      {filteredOccupancy.map((o) => (
-                        <tr
-                          key={o.id}
-                          className={`hover:bg-amber-50/40 transition-colors ${
-                            o.isDueToday ? 'bg-amber-50/20' : ''
-                          }`}
-                        >
-                          {/* Shot View Number */}
-                          <td className="px-4 py-3.5">
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-stone-900 text-amber-400 font-mono font-black text-xs shadow-2xs">
-                              {o.shotNumber}
-                            </span>
-                          </td>
-
-                          {/* Room Number */}
-                          <td className="px-4 py-3.5">
-                            <div className="flex flex-col">
-                              <span className="font-black text-brand-700 text-sm">
-                                Room {o.roomName || o.roomId}
-                              </span>
-                              <span className="text-[10px] text-stone-500">
-                                Fl. {o.roomFloor} • {o.roomCategory}
-                              </span>
-                            </div>
-                          </td>
-
-                          {/* Guest Name & Nationality */}
-                          <td className="px-4 py-3.5">
-                            <p className="font-bold text-stone-900 text-sm">{o.guestName}</p>
-                            <div className="flex items-center gap-1 mt-0.5 flex-wrap">
-                              <span className={`inline-block text-[10px] font-bold px-1.5 py-0.2 rounded border ${
-                                o.isKhmer
-                                  ? 'bg-rose-50 border-rose-200 text-rose-700'
-                                  : 'bg-blue-50 border-blue-200 text-blue-700'
-                              }`}>
-                                {o.isKhmer ? '🇰🇭 Cambodian' : `🌐 ${o.guestNationality || 'Foreign'}`}
-                              </span>
-                              {o.isMultiRoom && (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.2 rounded bg-indigo-50 border border-indigo-200 text-indigo-700" title={`Rooms: ${o.relatedStays.map(s => s.roomName || s.roomId).join(', ')}`}>
-                                  <i className="fa-solid fa-hotel text-[9px]"></i>
-                                  {o.relatedStays.length} Rooms
-                                </span>
-                              )}
-                            </div>
-                          </td>
-
-                          {/* Passport / National ID */}
-                          <td className="px-4 py-3.5">
-                            {o.passport ? (
-                              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-stone-100 hover:bg-stone-200 rounded-lg text-xs font-mono text-stone-800 transition">
-                                <i className="fa-solid fa-id-card text-stone-400 text-xs"></i>
-                                <span>{o.passport}</span>
-                                <button
-                                  type="button"
-                                  onClick={() => copyText(o.passport, `tbl-id-${o.id}`)}
-                                  className="text-stone-400 hover:text-brand-600 transition ml-1 cursor-pointer"
-                                  title="Copy ID"
-                                >
-                                  <i className={`fa-solid ${copiedId === `tbl-id-${o.id}` ? 'fa-check text-emerald-600' : 'fa-copy'}`}></i>
-                                </button>
-                              </div>
-                            ) : (
-                              <span className="text-stone-400 text-xs italic">None recorded</span>
-                            )}
-                          </td>
-
-                          {/* Phone */}
-                          <td className="px-4 py-3.5 font-mono text-xs text-stone-700">
-                            {o.guestPhone ? (
-                              <a href={`tel:${o.guestPhone}`} className="hover:text-brand-600 transition flex items-center gap-1">
-                                <i className="fa-solid fa-phone text-[10px] text-emerald-600"></i>
-                                {o.guestPhone}
-                              </a>
-                            ) : '—'}
-                          </td>
-
-                          {/* Check-in */}
-                          <td className="px-4 py-3.5 text-xs text-stone-700 font-medium">
-                            {o.checkInDate}
-                          </td>
-
-                          {/* Check-out */}
-                          <td className="px-4 py-3.5 text-xs">
-                            <span className={`font-bold ${o.isDueToday ? 'text-amber-700 font-black' : 'text-stone-800'}`}>
-                              {o.checkOutDate || 'Open'}
-                            </span>
-                            {o.isDueToday && (
-                              <span className="ml-1.5 px-1.5 py-0.2 bg-amber-500 text-white rounded text-[9px] font-black uppercase">
-                                Due Today
-                              </span>
-                            )}
-                          </td>
-
-                          {/* Security Status */}
-                          <td className="px-4 py-3.5">
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-bold">
-                              <i className="fa-solid fa-circle-check text-emerald-500 text-[9px]"></i>
-                              Verified In-House
-                            </span>
-                          </td>
-
-                          {/* Actions */}
-                          <td className="px-4 py-3.5 text-right whitespace-nowrap">
-                            <div className="flex items-center justify-end gap-1.5">
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  openEditOccupancy(o);
-                                }}
-                                className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold rounded-xl transition shadow-2xs cursor-pointer"
-                                title="Edit Guest Info, Price & Dates (កែប្រែព័ត៌មាន)"
-                              >
-                                <i className="fa-solid fa-pen-to-square text-indigo-600 mr-1"></i>
-                                Edit
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setInvoiceModalGuest(o);
-                                  setInvoiceModalRelated(o.relatedStays || [o]);
-                                }}
-                                className="px-2.5 py-1.5 bg-brand-50 hover:bg-brand-100 text-brand-700 border border-brand-200 text-xs font-bold rounded-xl transition shadow-2xs cursor-pointer"
-                                title="Print Official Guest Invoice / Folio"
-                              >
-                                <i className="fa-solid fa-file-invoice text-brand-600 mr-1"></i>
-                                Invoice
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setCheckInForm(prev => ({
-                                    ...prev,
-                                    guestName: o.guestName || '',
-                                    guestPhone: o.guestPhone || '',
-                                    guestNationality: o.guestNationality || '',
-                                    passportOrId: o.passport || o.passportOrId || '',
-                                    notes: `Additional room for ${o.guestName}`
-                                  }));
-                                  window.scrollTo({ top: 300, behavior: 'smooth' });
-                                }}
-                                className="px-2 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 border border-stone-200 text-xs font-bold rounded-xl transition shadow-2xs cursor-pointer"
-                                title="Add another room for this guest"
-                              >
-                                <i className="fa-solid fa-plus text-emerald-600 mr-1"></i>
-                                + Room
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setSelectedSecurityGuest(o)}
-                                className="px-2.5 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-bold rounded-xl transition shadow-2xs cursor-pointer"
-                                title="View Security Shot Snapshot"
-                              >
-                                <i className="fa-solid fa-eye text-brand-600 mr-1"></i>
-                                Shot
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleCheckOut(o)}
-                                className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-xl text-xs font-bold transition shadow-2xs cursor-pointer"
-                                title="Check Out Guest (View Details & Settle)"
-                              >
-                                <i className="fa-solid fa-right-from-bracket mr-1"></i>
-                                Out
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-
-                      {filteredOccupancy.length === 0 && (
-                        <tr>
-                          <td colSpan="9" className="py-12 text-center text-stone-400 bg-white">
-                            <i className="fa-solid fa-user-xmark text-2xl mb-2 block text-stone-300"></i>
-                            No active checked-in guests found matching your criteria.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
+            {renderActiveCheckedInGuests(false)}
           </div>
+        </div>
+      )}
+      {/* ───────────────────────────────────────────────────────────────────── */}
+      {/* 3B. DEDICATED ACTIVE CHECKED-IN GUESTS TAB (FULL WIDTH)               */}
+      {/* ───────────────────────────────────────────────────────────────────── */}
+      {subSection === 'active-guests' && (
+        <div className="space-y-6">
+          {renderActiveCheckedInGuests(true)}
         </div>
       )}
 

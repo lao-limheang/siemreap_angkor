@@ -1,4 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
+import { jsPDF } from 'jspdf';
+import { toCanvas } from 'html-to-image';
 
 export default function RoomInvoiceModal({
   isOpen,
@@ -16,6 +18,7 @@ export default function RoomInvoiceModal({
   const invSettings = settings.invoice_settings || {};
   const pricingTax = settings.pricing_tax || {};
   const shopSet = settings.shop_settings || {};
+  const pMethods = settings.payment_methods || {};
 
   // Paper format state: 'a4' | 'pos80' | 'pos58'
   const defaultFormat = invSettings.paperSize || 'a4';
@@ -48,6 +51,9 @@ export default function RoomInvoiceModal({
   const showCompanyInfo = invSettings.showCompanyInfo !== false;
   const showPaymentStatus = invSettings.showPaymentStatus !== false;
   const customFooterNote = invSettings.footerNote || 'Thank you for choosing Siem Reap Angkor! We hope you have a pleasant stay near the temples.';
+  const showReceivingAccount = invSettings.showReceivingAccount !== false;
+  const receivingAccountNo = invSettings.receivingAccountNo || pMethods.abaAccountNumber || '000 314 574';
+  const receivingAccountHolder = invSettings.receivingAccountName || pMethods.abaAccountName || 'SOM SUMNANG';
 
   // Determine all rooms for this guest (multi-room support)
   const allStays = relatedOccupancies && relatedOccupancies.length > 0
@@ -109,12 +115,20 @@ export default function RoomInvoiceModal({
         cleanRoomName = String(stay.roomId).startsWith('Room') ? stay.roomId : `Room ${stay.roomId}`;
       }
 
+      // When admin sets a custom total, recalculate effective rate and mark as approximate
+      const qty = nights || 1;
+      const isAdminTotal = total !== calculatedTotal && stayTotal > 0;
+      const effectiveRate = isAdminTotal ? (total / qty) : rate;
+      const isApprox = isAdminTotal && (total % qty !== 0 || effectiveRate !== rate);
+
       return {
         id: stay.id || Math.random(),
         roomName: cleanRoomName,
         bedType: roomObj.bedType || `${stay.bedCount || roomObj.bedCount || 1} Bed`,
         floor: roomObj.floor || '1',
-        rate,
+        rate: effectiveRate,
+        originalRate: rate,
+        isApprox,
         nights,
         total
       };
@@ -149,10 +163,149 @@ export default function RoomInvoiceModal({
   const invoiceDate = formatSafeDate(primaryStay.createdAt);
   const invoiceTime = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
   const paymentStatus = (primaryStay.paymentStatus || 'paid').toUpperCase();
-  const paymentMethod = (primaryStay.paymentMethod || 'cash').toUpperCase();
+  const [paymentMethod, setPaymentMethod] = useState((primaryStay.paymentMethod || 'cash').toUpperCase());
+  const [receivingAccount, setReceivingAccount] = useState(
+    invSettings.receivingAccountNo || pMethods.abaAccountNumber || '000 314 574'
+  );
+  const [receivingAccountName, setReceivingAccountName] = useState(
+    invSettings.receivingAccountName || pMethods.abaAccountName || 'SOM SUMNANG'
+  );
+
+  useEffect(() => {
+    setPaymentMethod((primaryStay.paymentMethod || 'cash').toUpperCase());
+  }, [primaryStay.paymentMethod, primaryStay.id]);
+
+  useEffect(() => {
+    setReceivingAccount(invSettings.receivingAccountNo || pMethods.abaAccountNumber || '000 314 574');
+  }, [invSettings.receivingAccountNo, pMethods.abaAccountNumber]);
+
+  useEffect(() => {
+    setReceivingAccountName(invSettings.receivingAccountName || pMethods.abaAccountName || 'SOM SUMNANG');
+  }, [invSettings.receivingAccountName, pMethods.abaAccountName]);
 
   const isPos = paperFormat === 'pos80' || paperFormat === 'pos58';
   const posWidthClass = paperFormat === 'pos58' ? 'max-w-[290px]' : 'max-w-[360px]';
+
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [exportStatus, setExportStatus] = useState('idle'); // 'idle' | 'generating' | 'ready' | 'error'
+  const [downloadBlobUrl, setDownloadBlobUrl] = useState(null);
+  const [downloadFileName, setDownloadFileName] = useState('');
+
+  // Clean up blob URL on unmount or format change
+  useEffect(() => {
+    return () => {
+      if (downloadBlobUrl) {
+        URL.revokeObjectURL(downloadBlobUrl);
+      }
+    };
+  }, [downloadBlobUrl]);
+
+  useEffect(() => {
+    if (downloadBlobUrl) {
+      URL.revokeObjectURL(downloadBlobUrl);
+      setDownloadBlobUrl(null);
+      setDownloadFileName('');
+      setExportStatus('idle');
+    }
+  }, [paperFormat, occupancy?.id, isOpen]);
+
+  const handleExportPdf = async () => {
+    const printableEl = printRef.current;
+    if (!printableEl || isExportingPdf) return;
+
+    setIsExportingPdf(true);
+    setExportStatus('generating');
+
+    try {
+      // Target the inner folio container
+      const targetEl = printableEl.firstElementChild || printableEl;
+
+      printableEl.classList.add('pdf-rendering-active');
+
+      const canvas = await toCanvas(targetEl, {
+        pixelRatio: 2,
+        backgroundColor: '#ffffff',
+        filter: (node) => {
+          return !(node?.classList && node.classList.contains('print:hidden'));
+        }
+      });
+
+      printableEl.classList.remove('pdf-rendering-active');
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.95);
+      const safeInvoiceNo = (invoiceNumber || 'Invoice').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const filename = `${safeInvoiceNo}_${paperFormat.toUpperCase()}.pdf`;
+
+      let pdf;
+      if (paperFormat === 'a4') {
+        pdf = new jsPDF({
+          orientation: 'portrait',
+          unit: 'mm',
+          format: 'a4'
+        });
+
+        const pageWidth = 210;
+        const pageHeight = 297;
+        const margin = 8;
+        const contentWidth = pageWidth - (margin * 2);
+        const contentHeight = (canvas.height * contentWidth) / canvas.width;
+
+        let heightLeft = contentHeight;
+        let position = margin;
+
+        pdf.addImage(imgData, 'JPEG', margin, position, contentWidth, contentHeight, undefined, 'FAST');
+        heightLeft -= (pageHeight - (margin * 2));
+
+        while (heightLeft > 0) {
+          position = position - pageHeight + (margin * 2);
+          pdf.addPage();
+          pdf.addImage(imgData, 'JPEG', margin, position, contentWidth, contentHeight, undefined, 'FAST');
+          heightLeft -= (pageHeight - (margin * 2));
+        }
+      } else {
+        const widthMm = paperFormat === 'pos58' ? 58 : 80;
+        const margin = 2;
+        const contentWidth = widthMm - (margin * 2);
+        const contentHeight = (canvas.height * contentWidth) / canvas.width;
+        const pageHeight = Math.max(100, contentHeight + (margin * 2) + 4);
+
+        pdf = new jsPDF({
+          orientation: 'portrait',
+          unit: 'mm',
+          format: [widthMm, pageHeight]
+        });
+
+        pdf.addImage(imgData, 'JPEG', margin, margin, contentWidth, contentHeight, undefined, 'FAST');
+      }
+
+      const blob = pdf.output('blob');
+      const url = URL.createObjectURL(blob);
+      setDownloadBlobUrl(url);
+      setDownloadFileName(filename);
+      setExportStatus('ready');
+      setIsExportingPdf(false);
+
+      // Trigger instant automatic download
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        if (link.parentNode) link.parentNode.removeChild(link);
+      }, 1000);
+    } catch (err) {
+      console.error('Direct PDF export error:', err);
+      if (printableEl) {
+        printableEl.classList.remove('pdf-rendering-active');
+      }
+      setExportStatus('error');
+      setIsExportingPdf(false);
+      setTimeout(() => {
+        setExportStatus('idle');
+      }, 3000);
+    }
+  };
 
   const handlePrint = () => {
     const printableEl = printRef.current;
@@ -283,6 +436,9 @@ export default function RoomInvoiceModal({
             border-radius: 0 !important;
           }
         }
+        .pdf-rendering-active .print\\:hidden {
+          display: none !important;
+        }
       `}</style>
 
       {/* Container */}
@@ -347,8 +503,83 @@ export default function RoomInvoiceModal({
             </button>
           </div>
 
+          {/* Quick Payment Method Selector in Header (Print: Hidden) */}
+          <div className="flex items-center gap-1.5 bg-stone-800 px-2.5 py-1 rounded-xl border border-stone-700 text-xs">
+            <span className="text-[10px] text-stone-400 font-bold uppercase">Payment:</span>
+            <select
+              value={['CASH', 'ABA', 'KHQR', 'CARD', 'BANK TRANSFER'].includes(paymentMethod) ? paymentMethod : 'OTHER'}
+              onChange={(e) => {
+                if (e.target.value !== 'OTHER') {
+                  setPaymentMethod(e.target.value);
+                }
+              }}
+              className="bg-stone-900 text-white text-xs font-bold rounded-lg px-2 py-0.5 border border-stone-600 focus:outline-hidden cursor-pointer"
+            >
+              <option value="CASH">CASH</option>
+              <option value="ABA">ABA</option>
+              <option value="KHQR">KHQR</option>
+              <option value="CARD">CARD</option>
+              <option value="BANK TRANSFER">BANK TRANSFER</option>
+              {!['CASH', 'ABA', 'KHQR', 'CARD', 'BANK TRANSFER'].includes(paymentMethod) && (
+                <option value="OTHER">{paymentMethod}</option>
+              )}
+            </select>
+          </div>
+
           {/* Actions */}
           <div className="flex items-center gap-2">
+            {exportStatus === 'ready' && downloadBlobUrl ? (
+              <div className="flex items-center gap-1.5">
+                <a
+                  href={downloadBlobUrl}
+                  download={downloadFileName}
+                  className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-sm cursor-pointer active:scale-95"
+                  title="Click to save the PDF file"
+                >
+                  <i className="fa-solid fa-download text-xs"></i>
+                  <span>Download .PDF</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={() => window.open(downloadBlobUrl, '_blank')}
+                  className="px-2.5 py-1.5 bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-bold rounded-xl transition flex items-center gap-1 cursor-pointer"
+                  title="Open PDF in new tab"
+                >
+                  <i className="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
+                  <span>Open</span>
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handleExportPdf}
+                disabled={isExportingPdf}
+                className={`px-3 py-1.5 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 shadow-sm cursor-pointer active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed ${
+                  exportStatus === 'error'
+                    ? 'bg-rose-700 hover:bg-rose-600'
+                    : 'bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 hover:shadow-md'
+                }`}
+                title={`Export directly as .pdf file (${paperFormat.toUpperCase()})`}
+              >
+                {exportStatus === 'generating' ? (
+                  <>
+                    <i className="fa-solid fa-circle-notch fa-spin text-xs"></i>
+                    <span>Exporting...</span>
+                  </>
+                ) : exportStatus === 'error' ? (
+                  <>
+                    <i className="fa-solid fa-triangle-exclamation text-xs"></i>
+                    <span>Retry PDF</span>
+                  </>
+                ) : (
+                  <>
+                    <i className="fa-solid fa-file-pdf text-xs"></i>
+                    <span>Export .PDF</span>
+                  </>
+                )}
+              </button>
+            )}
+
             <button
               type="button"
               onClick={handlePrint}
@@ -492,7 +723,7 @@ export default function RoomInvoiceModal({
                         </p>
                       </td>
                       <td className="py-3 px-2 text-center font-mono">{item.nights !== undefined ? item.nights : (item.qty || 1)}</td>
-                      <td className="py-3 px-2 text-right font-mono">{currency(item.rate)}</td>
+                      <td className="py-3 px-2 text-right font-mono">{item.isApprox ? '≈' : ''}{currency(item.rate)}</td>
                       <td className="py-3 px-2 text-right font-mono font-bold text-stone-900">{currency(item.total)}</td>
                     </tr>
                   ))}
@@ -505,7 +736,87 @@ export default function RoomInvoiceModal({
               <div className="max-w-xs text-[11px] text-stone-500">
                 <p className="font-bold text-stone-700 uppercase tracking-wider text-[10px] mb-1">Terms & Conditions</p>
                 <p>{customFooterNote}</p>
-                <p className="mt-1 font-mono text-[10px] text-stone-400">Payment Method: {paymentMethod}</p>
+
+                {/* Invoice Display Lines */}
+                <p className="mt-1 font-mono text-[10px] text-stone-500">
+                  Payment Method: <span className="font-semibold text-stone-700">{paymentMethod}</span>
+                </p>
+                {showReceivingAccount && (
+                  <div className="mt-1 font-mono text-[10px] text-stone-600 space-y-0.5">
+                    <p>
+                      ដាក់លេខគណនីទទួល <span className="font-bold text-stone-800">{receivingAccount}</span>
+                    </p>
+                    {receivingAccountName && (
+                      <p>
+                        ឈ្មោះគណនីទទួល <span className="font-bold text-stone-800">{receivingAccountName}</span>
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Form Input View (Screen only, hidden during print) */}
+                <div className="mt-3 p-3 bg-stone-50/90 rounded-2xl border border-stone-200 print:hidden space-y-2.5">
+                  <div>
+                    <label className="block text-[10px] font-bold text-stone-700 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                      <i className="fa-solid fa-money-check text-brand-600"></i>
+                      <span>Payment Method (វិធីសាស្រ្តទូទាត់):</span>
+                    </label>
+                    <div className="flex flex-wrap items-center gap-1 mb-1.5">
+                      {['CASH', 'ABA', 'KHQR', 'BANK TRANSFER', 'CARD'].map((pm) => (
+                        <button
+                          key={pm}
+                          type="button"
+                          onClick={() => setPaymentMethod(pm)}
+                          className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                            paymentMethod.toUpperCase() === pm
+                              ? 'bg-brand-600 text-white shadow-2xs'
+                              : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-100'
+                          }`}
+                        >
+                          {pm}
+                        </button>
+                      ))}
+                    </div>
+                    <input
+                      type="text"
+                      value={paymentMethod}
+                      onChange={(e) => setPaymentMethod(e.target.value.toUpperCase())}
+                      className="w-full px-2.5 py-1 bg-white border border-stone-300 rounded-lg text-xs font-mono font-bold text-stone-900 uppercase focus:ring-1 focus:ring-brand-500 focus:outline-hidden"
+                      placeholder="e.g. CASH, ABA, KHQR..."
+                    />
+                  </div>
+
+                  {showReceivingAccount && (
+                    <div className="pt-2 border-t border-stone-200/80 space-y-2">
+                      <div>
+                        <label className="block text-[10px] font-bold text-stone-700 mb-1 flex items-center gap-1.5">
+                          <i className="fa-solid fa-building-columns text-blue-600"></i>
+                          <span>ដាក់លេខគណនីទទួល (Account No):</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={receivingAccount}
+                          onChange={(e) => setReceivingAccount(e.target.value)}
+                          className="w-full px-2.5 py-1 bg-white border border-stone-300 rounded-lg text-xs font-mono font-bold text-stone-900 focus:ring-1 focus:ring-brand-500 focus:outline-hidden"
+                          placeholder="000 314 574"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-stone-700 mb-1 flex items-center gap-1.5">
+                          <i className="fa-regular fa-user text-stone-500"></i>
+                          <span>ឈ្មោះគណនីទទួល (Account Name):</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={receivingAccountName}
+                          onChange={(e) => setReceivingAccountName(e.target.value)}
+                          className="w-full px-2.5 py-1 bg-white border border-stone-300 rounded-lg text-xs font-bold text-stone-900 focus:ring-1 focus:ring-brand-500 focus:outline-hidden"
+                          placeholder="SOM SUMNANG"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="w-full sm:w-64 space-y-2 text-xs">
@@ -637,7 +948,7 @@ export default function RoomInvoiceModal({
                     <span className="text-right">{currency(it.total)}</span>
                   </div>
                   <div className="flex justify-between text-[9px] text-stone-500">
-                    <span>{it.nights !== undefined ? `${it.nights} nights @ ${currency(it.rate)}` : `${it.qty || 1} x ${currency(it.rate)}`}</span>
+                    <span>{it.nights !== undefined ? `${it.nights} nights @ ${it.isApprox ? '≈' : ''}${currency(it.rate)}` : `${it.qty || 1} x ${it.isApprox ? '≈' : ''}${currency(it.rate)}`}</span>
                     <span>{it.floor ? `Fl.${it.floor}` : ''}</span>
                   </div>
                 </div>
@@ -677,6 +988,12 @@ export default function RoomInvoiceModal({
                 <span>STATUS:</span>
                 <span>{paymentStatus} ({paymentMethod})</span>
               </div>
+              {showReceivingAccount && (
+                <div className="pt-1.5 mt-1 border-t border-dashed border-stone-300 text-center text-[9px] text-stone-700 font-mono space-y-0.5">
+                  <div>ដាក់លេខគណនីទទួល {receivingAccount}</div>
+                  {receivingAccountName && <div>ឈ្មោះគណនីទទួល {receivingAccountName}</div>}
+                </div>
+              )}
             </div>
 
             {/* Receipt Divider */}

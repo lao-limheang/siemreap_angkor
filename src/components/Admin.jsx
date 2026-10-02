@@ -47,6 +47,7 @@ import SettingsTab from './admin/SettingsTab';
 import ReportsTab from './admin/ReportsTab';
 import RoomInvoiceModal from './admin/RoomInvoiceModal';
 import DashboardPrintModal from './admin/DashboardPrintModal';
+import CustomInvoiceTab from './admin/CustomInvoiceTab';
 import { normalizeRental, normalizeBooking, normalizeRoom, normalizeMoto, normalizeModel, normalizeBedCategory, asArray, toDateStr } from '../utils/dataNormalizer';
 import { fileToBase64 } from '../utils/imageUtils';
 import PaginationControls from './common/PaginationControls';
@@ -75,9 +76,13 @@ const statusBadge = {
 const NAV = [
   { id: 'dashboard',         label: 'Dashboard',         icon: 'fa-table-cells-large',   section: 'ទិដ្ឋភាពទូទៅ' },
   { id: 'rooms',             label: 'Rooms',             icon: 'fa-building',            section: 'បន្ទប់' },
+  { id: 'bed-categories',    label: 'Bed Categories',    icon: 'fa-layer-group',         section: 'បន្ទប់' },
   { id: 'room-bookings',     label: 'Room Bookings',     icon: 'fa-calendar-check',      section: 'បន្ទប់' },
+  { id: 'checkin-occupancy',  label: 'Check-in & Occupancy', icon: 'fa-bed',             section: 'បន្ទប់' },
+  { id: 'active-guests',      label: 'Active Checked-in Guests', icon: 'fa-user-check',   section: 'បន្ទប់' },
   { id: 'room-history',      label: 'Room History',      icon: 'fa-clock-rotate-left',   section: 'បន្ទប់' },
   { id: 'room-income',       label: 'Room Income',       icon: 'fa-hand-holding-dollar', section: 'បន្ទប់' },
+  { id: 'custom-invoice',    label: 'Custom Invoice (វិក្កយបត្រផ្សេងៗ)', icon: 'fa-file-invoice-dollar', section: 'វិក្កយបត្រផ្សេងៗ' },
   { id: 'fleet',             label: 'Bikes',             icon: 'fa-motorcycle',          section: 'ម៉ូតូ & អតិថិជន' },
   { id: 'guests',            label: 'Customers',         icon: 'fa-user-tie',            section: 'ម៉ូតូ & អតិថិជន' },
   { id: 'customer-documents',label: 'Customer Documents',icon: 'fa-file-lines',          section: 'ម៉ូតូ & អតិថិជន' },
@@ -160,13 +165,14 @@ export default function Admin() {
     contact_info: { address: '', telegramUrl: '', telegramHandle: '', whatsappUrl: '', whatsappDisplay: '', facebookUrl: '', mapUrl: '', mapEmbed: '', hours: '' },
     business_profile: { hotelName: 'Motor Rental Siem Reap Angkor & Guesthouse', phone: '+855 016 308 199', email: 'info@siemreapangkor.com', address: 'Near Angkor Wat Main Gate, Siem Reap, Cambodia', logo: '/assets/logo.png', checkInTime: '14:00', checkOutTime: '12:00', cancellationPolicy: 'Free cancellation up to 24 hours prior to arrival. Late cancellations charged 1 night stay.', depositRule: '$50 USD cash deposit or original valid Passport/National ID required upon check-in/rental.', rentalTerms: "Driver must possess a valid driver's license or passport. Helmets are provided and mandatory." },
     pricing_tax: { primaryCurrency: 'USD', secondaryCurrency: 'KHR', exchangeRate: 4100, vatPercent: 10, serviceChargePercent: 5, cleaningFee: 5, lateCheckoutPerHour: 5, lateReturnPerHour: 3, highSeasonActive: false, highSeasonMultiplier: 1.2 },
-    payment_methods: { cashEnabled: true, abaKhqrEnabled: true, abaAccountName: 'MOTOR RENTAL SIEM REAP ANGKOR', abaAccountNumber: '016 308 199 (USD)', abaQrImage: '', cardEnabled: true, bankTransferEnabled: true },
-    invoice_settings: { companyHeader: 'Siem Reap Angkor Guesthouse & Motor Rentals', taxNumber: 'K002-901829381', footerNote: 'Thank you for choosing Siem Reap Angkor! Safe travels around the temples.', terms: 'Please retain this invoice for your records. All damage and late return fees are subject to inspection.' },
+    payment_methods: { cashEnabled: true, abaKhqrEnabled: true, abaAccountName: 'SOM SUMNANG', abaAccountNumber: '000 314 574', abaAccountCurrency: 'USD', abaQrImage: '', cardEnabled: true, bankTransferEnabled: true },
+    invoice_settings: { companyHeader: 'Siem Reap Angkor Guesthouse & Motor Rentals', taxNumber: 'K002-901829381', footerNote: 'Thank you for choosing Siem Reap Angkor! Safe travels around the temples.', terms: 'Please retain this invoice for your records. All damage and late return fees are subject to inspection.', showReceivingAccount: true, receivingAccountNo: '000 314 574', receivingAccountName: 'SOM SUMNANG' },
     notification_settings: { telegramNewBooking: true, telegramMaintenanceAlert: true, telegramCheckoutReminder: true, emailNotificationEnabled: false, recipientEmail: 'yourshop@email.com', returnReminderEnabled: true, returnReminderLeadDays: 1, maintenanceReminderEnabled: true, maintenanceReminderInterval: 15, guestVoucherTemplate: 'Hello {guest_name}, your booking at Siem Reap Angkor for {item_name} ({start_date} to {end_date}) is CONFIRMED! Contact: +855 016 308 199', guestReminderTemplate: 'Dear {guest_name}, friendly reminder that your check-in date is tomorrow {start_date}. We look forward to welcoming you!' },
     security_settings: { autoBackupEnabled: true, backupFrequency: 'daily', requireStrongPasswords: true, sessionTimeoutMinutes: 120 },
     shop_settings: { shopName: 'Motorental Siemreab Angkor', logo: '/assets/logo.png', rentalHoursPerDay: 12, operatingHoursOpen: '06:00 AM', operatingHoursClose: '10:00 PM', depositDocTypes: "National ID, Passport, Driver's License, Birth Certificate, None" },
     theme_settings: { presetName: 'Angkor Terracotta', primaryColor: '#c0622b' },
-    telegram_settings: { botToken: '', chatId: '', checkoutAlertEnabled: true, checkinAlertEnabled: true, roomCheckinAlertEnabled: true, roomCheckoutAlertEnabled: true, bookingAlertEnabled: true, rentalAlertTemplate: '', checkoutAlertTemplate: '', returnAlertTemplate: '', checkinAlertTemplate: '', roomCheckinAlertTemplate: '', roomCheckoutAlertTemplate: '', bookingAlertTemplate: '', revenueAlertTemplate: '' }
+    telegram_settings: { botToken: '', chatId: '', checkoutAlertEnabled: true, checkinAlertEnabled: true, roomCheckinAlertEnabled: true, roomCheckoutAlertEnabled: true, bookingAlertEnabled: true, rentalAlertTemplate: '', checkoutAlertTemplate: '', returnAlertTemplate: '', checkinAlertTemplate: '', roomCheckinAlertTemplate: '', roomCheckoutAlertTemplate: '', bookingAlertTemplate: '', revenueAlertTemplate: '' },
+    custom_invoice_profile: { businessName: 'Siem Reap Angkor Services & Hospitality', invoiceTitle: 'OFFICIAL RECEIPT / INVOICE', subtitle: 'Tours, Transportation, Guest Services & Custom Folio', logo: '/assets/logo.png', address: 'Near Angkor Wat Main Gate, Siem Reap, Cambodia', phone: '+855 016 308 199', email: 'info@siemreapangkor.com', taxNumber: 'K002-901829381', currency: 'USD', exchangeRate: 4000, receivingAccountNo: '000 314 574', receivingAccountName: 'SOM SUMNANG', footerNote: 'Thank you for choosing our services! Safe travels around Siem Reap & Angkor temples.', terms: 'Please retain this official receipt for your records. All tours and services subject to local safety guidelines.', paperSize: 'a4', showLogo: true, showKhr: true, showSignatures: true, showTaxId: true, showReceivingAccount: true }
   });
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [testResult, setTestResult] = useState(null);
@@ -302,7 +308,7 @@ export default function Admin() {
       .then(data => {
         if (data && typeof data === 'object') {
           const parsed = {};
-          ['hero_images','about_us','why_us','services_bar','testimonials','contact_info','business_profile','pricing_tax','payment_methods','invoice_settings','notification_settings','security_settings','public_texts','shop_settings','theme_settings','telegram_settings'].forEach(k => {
+          ['hero_images','about_us','why_us','services_bar','testimonials','contact_info','business_profile','pricing_tax','payment_methods','invoice_settings','notification_settings','security_settings','public_texts','shop_settings','theme_settings','telegram_settings','custom_invoice_profile','bar_profile','custom_invoices_history'].forEach(k => {
             if (data[k]) {
               try {
                 parsed[k] = typeof data[k] === 'string' ? JSON.parse(data[k]) : data[k];
@@ -314,6 +320,7 @@ export default function Admin() {
           if ('hero_images' in parsed) parsed.hero_images = asArray(parsed.hero_images);
           if ('testimonials' in parsed) parsed.testimonials = asArray(parsed.testimonials);
           if ('services_bar' in parsed) parsed.services_bar = asArray(parsed.services_bar);
+          if ('custom_invoices_history' in parsed) parsed.custom_invoices_history = asArray(parsed.custom_invoices_history);
           if (parsed.why_us && typeof parsed.why_us === 'object') {
             parsed.why_us = {
               ...parsed.why_us,
@@ -684,6 +691,8 @@ export default function Admin() {
                 {sectionTabs.map(n => {
                   const isRoomBk = n.id === 'room-bookings';
                   const isMotorBk = n.id === 'bookings';
+                  const isActiveGuests = n.id === 'active-guests';
+                  const activeGuestsCount = (occupancy || []).filter(o => o.status === 'checked_in' || o.status === 'active' || o.status === 'occupied').length;
                   const pendingCount = isRoomBk ? pendingRoomBookings : isMotorBk ? pendingMotorBookings : 0;
 
                   return (
@@ -698,6 +707,13 @@ export default function Admin() {
                           activeTab === n.id ? 'bg-white text-stone-900 shadow-xs' : 'bg-amber-500 text-white animate-pulse'
                         }`}>
                           {pendingCount}
+                        </span>
+                      )}
+                      {isActiveGuests && activeGuestsCount > 0 && (
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-black tracking-wider ${
+                          activeTab === n.id ? 'bg-white text-emerald-800 shadow-xs' : 'bg-emerald-500 text-white'
+                        }`}>
+                          {activeGuestsCount}
                         </span>
                       )}
                     </button>
@@ -728,7 +744,7 @@ export default function Admin() {
         </div>
 
         {/* ── Page header ───────────────────────────────────────────────── */}
-        <div className="bg-white/95 backdrop-blur-md border-b border-stone-200/80 px-3.5 py-3 sm:px-6 sm:py-3.5 md:px-8 md:py-4 flex items-center justify-between sticky top-0 z-20 shadow-xs gap-2">
+        <div className="no-print bg-white/95 backdrop-blur-md border-b border-stone-200/80 px-3.5 py-3 sm:px-6 sm:py-3.5 md:px-8 md:py-4 flex items-center justify-between sticky top-0 z-20 shadow-xs gap-2">
           <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
             {/* Mobile hamburger button */}
             <button
@@ -829,6 +845,109 @@ export default function Admin() {
               <AdminTableSkeleton rows={7} cols={6} />
             ) : (
               <RoomsTab
+                initialSubSection="rooms"
+                bookings={bookings}
+                setBookings={setBookings}
+                rooms={rooms}
+                bedCategories={bedCategories}
+                occupancy={occupancy}
+                guests={guests}
+                auth={auth}
+                fetchAll={fetchAll}
+                fetchDash={fetchDash}
+                inputCls={inputCls}
+                labelCls={labelCls}
+                cardCls={cardCls}
+                btnPrimary={btnPrimary}
+                btnSecondary={btnSecondary}
+                btnDanger={btnDanger}
+                statusBadge={statusBadge}
+                today={today}
+                currency={currency}
+                sendCategoryTelegramAlert={sendCategoryTelegramAlert}
+                tgSending={tgSending}
+                settings={settings}
+              />
+            )
+          )}
+
+          {/* ═══════════════════════════════════════════════════════════════ */}
+          {/* BED CATEGORIES                                                */}
+          {/* ═══════════════════════════════════════════════════════════════ */}
+          {activeTab === 'bed-categories' && (
+            loadingData ? (
+              <AdminTableSkeleton rows={5} cols={4} />
+            ) : (
+              <RoomsTab
+                initialSubSection="categories"
+                bookings={bookings}
+                setBookings={setBookings}
+                rooms={rooms}
+                bedCategories={bedCategories}
+                occupancy={occupancy}
+                guests={guests}
+                auth={auth}
+                fetchAll={fetchAll}
+                fetchDash={fetchDash}
+                inputCls={inputCls}
+                labelCls={labelCls}
+                cardCls={cardCls}
+                btnPrimary={btnPrimary}
+                btnSecondary={btnSecondary}
+                btnDanger={btnDanger}
+                statusBadge={statusBadge}
+                today={today}
+                currency={currency}
+                sendCategoryTelegramAlert={sendCategoryTelegramAlert}
+                tgSending={tgSending}
+                settings={settings}
+              />
+            )
+          )}
+
+          {/* ═══════════════════════════════════════════════════════════════ */}
+          {/* CHECK-IN & OCCUPANCY                                          */}
+          {/* ═══════════════════════════════════════════════════════════════ */}
+          {activeTab === 'checkin-occupancy' && (
+            loadingData ? (
+              <AdminTableSkeleton rows={5} cols={4} />
+            ) : (
+              <RoomsTab
+                initialSubSection="occupancy"
+                bookings={bookings}
+                setBookings={setBookings}
+                rooms={rooms}
+                bedCategories={bedCategories}
+                occupancy={occupancy}
+                guests={guests}
+                auth={auth}
+                fetchAll={fetchAll}
+                fetchDash={fetchDash}
+                inputCls={inputCls}
+                labelCls={labelCls}
+                cardCls={cardCls}
+                btnPrimary={btnPrimary}
+                btnSecondary={btnSecondary}
+                btnDanger={btnDanger}
+                statusBadge={statusBadge}
+                today={today}
+                currency={currency}
+                sendCategoryTelegramAlert={sendCategoryTelegramAlert}
+                tgSending={tgSending}
+                settings={settings}
+              />
+            )
+          )}
+
+          {/* ═══════════════════════════════════════════════════════════════ */}
+          {/* ACTIVE CHECKED-IN GUESTS (ភ្ញៀវកំពុងស្នាក់នៅ)                    */}
+          {/* ═══════════════════════════════════════════════════════════════ */}
+          {activeTab === 'active-guests' && (
+            loadingData ? (
+              <AdminTableSkeleton rows={5} cols={4} />
+            ) : (
+              <RoomsTab
+                initialSubSection="active-guests"
                 bookings={bookings}
                 setBookings={setBookings}
                 rooms={rooms}
@@ -1593,6 +1712,18 @@ export default function Admin() {
               btnPrimary={btnPrimary}
               btnSecondary={btnSecondary}
               btnDanger={btnDanger}
+              currency={currency}
+            />
+          )}
+
+          {/* ═══════════════════════════════════════════════════════════════ */}
+          {/* CUSTOM INVOICE & OTHER RECEIPTS                              */}
+          {/* ═══════════════════════════════════════════════════════════════ */}
+          {activeTab === 'custom-invoice' && (
+            <CustomInvoiceTab
+              settings={settings}
+              setSettings={setSettings}
+              auth={auth}
               currency={currency}
             />
           )}

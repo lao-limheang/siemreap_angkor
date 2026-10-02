@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useModal } from '../common/ModalProvider';
 import { BookingService, HotelBookingService, OccupancyService, syncBookingToOldSystem } from '../../services/DatabaseService';
+import SearchRoomPicker from './SearchRoomPicker';
 
 export default function RoomBookingsTab({
   bookings = [],
@@ -82,6 +83,7 @@ export default function RoomBookingsTab({
 
   const [newForm, setNewForm] = useState({
     roomId: '',
+    roomIds: [],
     customerName: '',
     phone: '',
     email: '',
@@ -90,6 +92,7 @@ export default function RoomBookingsTab({
     endDate: tomorrowStr,
     guests: 2,
     bedCount: 1,
+    deposit: '',
     bookingSource: 'Facebook',
     paymentMethod: 'cash',
     arrivalTime: '14:00 - 16:00',
@@ -223,28 +226,36 @@ export default function RoomBookingsTab({
     }
   };
 
-  // ─── CHECK-IN GUEST DIRECTLY TO ROOM ──────────────────────────────────────
+  // ─── CHECK-IN GUEST DIRECTLY TO ROOM (SUPPORTS MULTI-ROOM) ───────────────
   const handleDirectCheckIn = async (booking) => {
+    const targetRoomIds = (booking.roomIds && booking.roomIds.length > 0)
+      ? booking.roomIds
+      : [booking.roomId];
+
+    const resolvedRooms = targetRoomIds.map(rid => {
+      return rooms.find(r => String(r.id) === String(rid)) ||
+             rooms.find(r => r.name === String(rid)) ||
+             { id: rid, name: String(rid), price: 25 };
+    });
+
+    const roomNamesStr = resolvedRooms.map(r => r.name).join(', ') || booking.roomName || '101';
+
     if (!await showConfirm(
       'Confirm Check-In',
-      `Check in ${booking.customerName} into Room ${booking.roomName || booking.roomId}? This will set the room to occupied.`,
+      `Check in ${booking.customerName} into ${targetRoomIds.length > 1 ? `${targetRoomIds.length} rooms (${roomNamesStr})` : `Room ${roomNamesStr}`}? This will set ${targetRoomIds.length > 1 ? 'these rooms' : 'the room'} to occupied.`,
       'Check In Now',
       'primary'
     )) return;
 
     try {
-      // 1. Resolve roomId — look it up from rooms list by name if missing
-      const resolvedRoom =
-        rooms.find(r => String(r.id) === String(booking.roomId)) ||
-        rooms.find(r => r.name === booking.roomName) ||
-        null;
-      const resolvedRoomId = resolvedRoom?.id || booking.roomId || '';
-      const resolvedRoomName = booking.roomName || resolvedRoom?.name || '';
-
-      // 2. Post to room-occupancy API — properly await and check status
       const occupancyPayload = {
-        roomId: resolvedRoomId,
-        roomName: resolvedRoomName,   // server uses this as fallback to find room by name
+        roomId: targetRoomIds[0],
+        roomIds: targetRoomIds,
+        roomName: roomNamesStr,
+        roomNames: resolvedRooms.map(r => r.name),
+        price: booking.pricePerDay || resolvedRooms[0]?.price || 25,
+        totalPrice: booking.totalFee,
+        deposit: booking.deposit || 0,
         guestName: booking.customerName,
         guestPhone: booking.phone || booking.customerPhone || '',
         guestNationality: booking.nationality || '',
@@ -268,6 +279,11 @@ export default function RoomBookingsTab({
         throw new Error(errBody.error || `Server error ${occupancyRes.status}: Could not create check-in record.`);
       }
 
+      // Mark all rooms as occupied in RoomService
+      targetRoomIds.forEach(rid => {
+        if (rid) RoomService.update(rid, { status: 'occupied' }).catch(() => {});
+      });
+
       // 3. Mark booking as checked_in — pass bookingRef so DB match works
       await handleUpdateStatus(booking.id, 'checked_in', booking.bookingRef);
 
@@ -275,7 +291,7 @@ export default function RoomBookingsTab({
       if (fetchAll) await fetchAll();
       if (fetchDash) fetchDash();
 
-      showModal('success', 'Guest Checked In', `${booking.customerName} is now checked in to Room ${booking.roomName || resolvedRoomName || resolvedRoomId || ''}.`);
+      showModal('success', 'Guest Checked In', `${booking.customerName} is now checked in to ${targetRoomIds.length > 1 ? `${targetRoomIds.length} rooms (${roomNamesStr})` : `Room ${roomNamesStr}`}.`);
     } catch (err) {
       console.error('Check-in failed:', err);
       showModal('error', 'Check-in Failed', err.message || 'Could not complete check-in. Please try again.');
@@ -299,7 +315,7 @@ export default function RoomBookingsTab({
     });
   };
 
-  // ─── CREATE NEW ROOM BOOKING (MANUAL) ──────────────────────────────────────
+  // ─── CREATE NEW ROOM BOOKING (MANUAL - ONE RECORD PER CUSTOMER) ───────────
   const handleCreateNewBooking = async (e) => {
     e.preventDefault();
     if (!newForm.customerName.trim() || !newForm.phone.trim()) {
@@ -307,29 +323,54 @@ export default function RoomBookingsTab({
       return;
     }
 
-    const selectedR = rooms.find(r => String(r.id) === String(newForm.roomId)) || rooms[0];
-    const roomName = selectedR ? selectedR.name : '101';
-    const categoryName = selectedR ? selectedR.categoryName : 'Standard';
-    const bedType = selectedR ? selectedR.bedType : '1 Bed';
-    const nightlyRate = selectedR ? (selectedR.price || selectedR.rate || 25) : 25;
+    const targetRoomIds = (newForm.roomIds && newForm.roomIds.length > 0)
+      ? newForm.roomIds
+      : (newForm.roomId ? [newForm.roomId] : []);
+
+    if (targetRoomIds.length === 0) {
+      showModal('error', 'Select Room', 'Please search and select at least one room.');
+      return;
+    }
+
+    const selectedRooms = targetRoomIds.map(rid => {
+      return rooms.find(r => String(r.id) === String(rid)) || { id: rid, name: String(rid), price: 25 };
+    });
+
+    const roomNames = selectedRooms.map(r => r.name);
+    const roomNamesStr = roomNames.join(', ');
+    const totalNightlyRate = selectedRooms.reduce((sum, r) => sum + Number(r.price || r.rate || 25), 0);
+    const totalBeds = selectedRooms.reduce((sum, r) => sum + Number(r.bedCount || 1), 0);
 
     const start = new Date(newForm.startDate);
     const end = new Date(newForm.endDate);
-    const nights = Math.max(1, Math.ceil((end - start) / 86400000));
-    const totalFee = nightlyRate * nights;
+    const nights = Math.max(1, Math.ceil((end - start) / 86400000) || 1);
+    const totalFee = totalNightlyRate * nights;
+    const deposit = Number(newForm.deposit || 0);
 
-    const bookingRef = `SR-ROOM-${Math.floor(10000 + Math.random() * 90000)}`;
-    const itemName = `Room ${roomName} (${categoryName})`;
+    const baseRef = Math.floor(10000 + Math.random() * 90000);
+    const bookingRef = selectedRooms.length > 1
+      ? `SR-RMS-${roomNames.join('-')}-${baseRef}`
+      : `SR-RM${roomNames[0]}-${baseRef}`;
+
+    const categoryDescription = selectedRooms.length > 1
+      ? `${selectedRooms.length} Rooms (${selectedRooms.map(r => `Room ${r.name}: ${r.categoryName || r.bedType || 'Room'}`).join(', ')})`
+      : (selectedRooms[0]?.categoryName || 'Standard');
+
+    const itemName = selectedRooms.length > 1
+      ? `Rooms: ${roomNamesStr} (${selectedRooms.length} Rooms)`
+      : `Room ${roomNames[0]} (${categoryDescription})`;
 
     const bookingData = {
       type: 'room',
       itemName,
-      roomId: selectedR?.id || '',
-      roomName,
-      categoryName,
-      bedType,
-      bedCount: newForm.bedCount || selectedR?.bedCount || 1,
-      guests: newForm.guests || 2,
+      roomId: targetRoomIds[0],
+      roomIds: targetRoomIds,
+      roomName: roomNamesStr,
+      roomNames: roomNames,
+      categoryName: categoryDescription,
+      bedType: selectedRooms.map(r => r.bedType || `${r.bedCount || 1} Bed`).join(' + '),
+      bedCount: totalBeds,
+      guests: newForm.guests || (selectedRooms.length * 2),
       customerName: newForm.customerName.trim(),
       phone: newForm.phone.trim(),
       email: newForm.email.trim(),
@@ -337,8 +378,9 @@ export default function RoomBookingsTab({
       startDate: newForm.startDate,
       endDate: newForm.endDate,
       totalDays: nights,
-      pricePerDay: nightlyRate,
+      pricePerDay: totalNightlyRate,
       totalFee,
+      deposit,
       paymentMethod: newForm.paymentMethod,
       arrivalTime: newForm.arrivalTime,
       bookingSource: newForm.bookingSource || 'Direct / Social',
@@ -367,6 +409,7 @@ export default function RoomBookingsTab({
       // Reset form
       setNewForm({
         roomId: '',
+        roomIds: [],
         customerName: '',
         phone: '',
         email: '',
@@ -375,15 +418,25 @@ export default function RoomBookingsTab({
         endDate: tomorrowStr,
         guests: 2,
         bedCount: 1,
+        deposit: '',
         bookingSource: 'Facebook',
         paymentMethod: 'cash',
         arrivalTime: '14:00 - 16:00',
         specialRequests: ''
       });
 
-      showModal('success', 'Reservation Created', `Booking for Room ${roomName} (Ref: ${bookingRef}) created successfully.`);
+      showModal(
+        'success',
+        'Reservation Created',
+        selectedRooms.length > 1
+          ? `Booking confirmed for ${selectedRooms.length} rooms (${roomNamesStr}) for guest ${newForm.customerName.trim()}! Total: $${totalFee.toFixed(2)}${deposit > 0 ? ` (Deposit: $${deposit.toFixed(2)})` : ''}.`
+          : `Booking confirmed for Room ${roomNames[0]} for guest ${newForm.customerName.trim()}! Total: $${totalFee.toFixed(2)}${deposit > 0 ? ` (Deposit: $${deposit.toFixed(2)})` : ''}.`
+      );
+
       if (fetchAll) fetchAll();
+      if (fetchDash) fetchDash();
     } catch (err) {
+      console.error('Create booking error:', err);
       showModal('error', 'Booking Failed', err.message);
     }
   };
@@ -395,10 +448,12 @@ export default function RoomBookingsTab({
     email: '',
     nationality: '',
     roomId: '',
+    roomIds: [],
     startDate: '',
     endDate: '',
     guests: 1,
     bedCount: 1,
+    deposit: '',
     paymentMethod: 'cash',
     status: 'confirmed',
     specialRequests: '',
@@ -408,21 +463,33 @@ export default function RoomBookingsTab({
 
   const handleStartEditBooking = (b) => {
     setEditingBooking(b);
+    let parsedRoomIds = Array.isArray(b.roomIds) && b.roomIds.length > 0
+      ? [...b.roomIds]
+      : (b.roomId ? [b.roomId] : []);
+
+    if (parsedRoomIds.length <= 1 && b.roomName && String(b.roomName).includes(',')) {
+      const parts = String(b.roomName).split(',').map(s => s.trim().replace(/^Room\s+/i, '').replace(/^បន្ទប់\s+/i, ''));
+      const matched = rooms.filter(r => parts.includes(String(r.name)) || parts.includes(String(r.id))).map(r => r.id);
+      if (matched.length > 0) parsedRoomIds = matched;
+    }
+
     setEditForm({
       customerName: b.customerName || b.name || '',
       phone: b.phone || b.customerPhone || '',
       email: b.email || '',
       nationality: b.nationality || '',
-      roomId: b.roomId || '',
+      roomId: b.roomId || (parsedRoomIds[0] || ''),
+      roomIds: parsedRoomIds,
       startDate: b.startDate || b.checkInDate || '',
       endDate: b.endDate || b.checkOutDate || '',
       guests: Number(b.guests || 1),
       bedCount: Number(b.bedCount || 1),
+      deposit: b.deposit !== undefined && b.deposit !== null ? b.deposit : '',
       paymentMethod: b.paymentMethod || 'cash',
       status: b.status || 'confirmed',
       specialRequests: b.specialRequests || b.notes || '',
       pricePerDay: Number(b.pricePerDay || b.price || 25),
-      totalFee: Number(b.totalFee || b.pricePerDay * b.totalDays || 25)
+      totalFee: Number(b.totalFee || b.pricePerDay * (b.totalDays || 1) || 25)
     });
   };
 
@@ -430,43 +497,154 @@ export default function RoomBookingsTab({
     e.preventDefault();
     if (!editingBooking) return;
     try {
-      const selectedR = rooms.find(r => String(r.id) === String(editForm.roomId));
-      const roomName = selectedR ? selectedR.name : (editingBooking.roomName || '101');
-      const categoryName = selectedR ? selectedR.categoryName : (editingBooking.categoryName || 'Standard');
+      const targetRoomIds = (editForm.roomIds && editForm.roomIds.length > 0)
+        ? editForm.roomIds
+        : (editForm.roomId ? [editForm.roomId] : []);
+
+      const selectedRooms = targetRoomIds.map(rid => {
+        return rooms.find(r => String(r.id) === String(rid)) || { id: rid, name: String(rid), price: 25 };
+      });
+
+      const roomNames = selectedRooms.length > 0 ? selectedRooms.map(r => r.name) : [editingBooking.roomName || '101'];
+      const roomNamesStr = roomNames.join(', ');
+      const totalNightlyRate = selectedRooms.reduce((sum, r) => sum + Number(r.price || r.rate || 25), 0) || Number(editForm.pricePerDay || 25);
 
       const start = new Date(editForm.startDate);
       const end = new Date(editForm.endDate);
       const nights = Math.max(1, Math.ceil((end - start) / 86400000) || 1);
-      const nightlyRate = Number(editForm.pricePerDay || selectedR?.price || 25);
-      const totalFee = editForm.totalFee ? Number(editForm.totalFee) : nightlyRate * nights;
+      const totalFee = editForm.totalFee ? Number(editForm.totalFee) : totalNightlyRate * nights;
+      const deposit = Number(editForm.deposit || 0);
 
       const updated = {
         ...editingBooking,
         ...editForm,
-        roomName,
-        categoryName,
-        itemName: `Room ${roomName} (${categoryName})`,
+        roomId: targetRoomIds[0] || editForm.roomId,
+        roomIds: targetRoomIds,
+        roomName: roomNamesStr,
+        roomNames: roomNames,
+        deposit,
         totalDays: nights,
-        pricePerDay: nightlyRate,
-        totalFee
+        pricePerDay: totalNightlyRate,
+        totalFee,
+        itemName: selectedRooms.length > 1
+          ? `Rooms: ${roomNamesStr} (${selectedRooms.length} Rooms)`
+          : `Room ${roomNames[0]}`
       };
 
       setBookings(prev => (prev || []).map(b => b.id === updated.id ? updated : b));
       setEditingBooking(null);
 
       await BookingService.update(updated.id, updated).catch(async () => {
-        await fetch(`/api/bookings/${updated.id}`, {
+        await fetch(`/api/bookings/${updated.bookingRef || updated.id}`, {
           method: 'PUT',
           headers: { ...(auth?.headers || {}), 'Content-Type': 'application/json' },
           body: JSON.stringify(updated)
         });
       });
 
-      showModal('success', 'Booking Updated', `Reservation for ${updated.customerName} (Room ${roomName}) updated successfully.`);
+      showModal('success', 'Booking Updated', `Reservation for ${updated.customerName} (Room ${roomNamesStr}) updated successfully with Deposit: $${deposit.toFixed(2)}.`);
       if (fetchAll) fetchAll();
       if (fetchDash) fetchDash();
     } catch (err) {
       showModal('error', 'Update Error', err.message);
+    }
+  };
+
+  // ─── DETECT SPLIT BOOKINGS FOR SAME CUSTOMER & CONSOLIDATE INTO 1 ─────────
+  const splitBookingGroups = useMemo(() => {
+    const active = roomBookings.filter(b => b.status !== 'cancelled');
+    const groups = {};
+    active.forEach(b => {
+      const nameKey = String(b.customerName || '').trim().toLowerCase();
+      const dateKey = String(b.startDate || b.checkInDate || '').trim();
+      if (!nameKey || !dateKey) return;
+      const key = `${nameKey}_${dateKey}`;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(b);
+    });
+    return Object.values(groups).filter(g => g.length > 1);
+  }, [roomBookings]);
+
+  const handleMergeBookings = async (group) => {
+    if (!group || group.length < 2) return;
+    const primary = group[0];
+    const others = group.slice(1);
+
+    const allRoomIds = [];
+    const allRoomNames = [];
+    let combinedTotal = 0;
+    let combinedDeposit = 0;
+    let combinedDaily = 0;
+    let combinedBeds = 0;
+
+    group.forEach(b => {
+      const bRoomIds = Array.isArray(b.roomIds) && b.roomIds.length > 0
+        ? b.roomIds
+        : (b.roomId ? [b.roomId] : []);
+      bRoomIds.forEach(id => { if (id && !allRoomIds.includes(id)) allRoomIds.push(id); });
+
+      const rName = b.roomName || b.roomId || '';
+      if (rName) {
+        String(rName).split(',').map(s => s.trim().replace(/^Room\s+/i, '').replace(/^បន្ទប់\s+/i, '')).forEach(n => {
+          if (n && !allRoomNames.includes(n)) allRoomNames.push(n);
+        });
+      }
+      combinedTotal += Number(b.totalFee || (b.pricePerDay || b.price || 25) * (b.totalDays || 1));
+      combinedDeposit += Number(b.deposit || 0);
+      combinedDaily += Number(b.pricePerDay || b.price || 25);
+      combinedBeds += Number(b.bedCount || 1);
+    });
+
+    const roomNamesStr = allRoomNames.join(', ');
+    const mergedBooking = {
+      ...primary,
+      roomIds: allRoomIds,
+      roomId: allRoomIds[0] || primary.roomId,
+      roomName: roomNamesStr,
+      roomNames: allRoomNames,
+      totalFee: combinedTotal,
+      pricePerDay: combinedDaily,
+      deposit: combinedDeposit,
+      bedCount: combinedBeds,
+      itemName: `Rooms: ${roomNamesStr} (${allRoomNames.length} Rooms)`,
+      categoryName: `${allRoomNames.length} Rooms (${roomNamesStr})`
+    };
+
+    if (!await showConfirm(
+      'Consolidate Reservations',
+      `Merge ${group.length} bookings for ${primary.customerName} into ONE record for Rooms ${roomNamesStr}? Total: $${combinedTotal.toFixed(2)}, Deposit: $${combinedDeposit.toFixed(2)}.`,
+      'Merge Now',
+      'primary'
+    )) return;
+
+    try {
+      // 1. Update primary in state and remove duplicates
+      const otherIds = others.map(o => o.id);
+      setBookings(prev => prev.filter(b => !otherIds.includes(b.id)).map(b => b.id === primary.id ? mergedBooking : b));
+
+      // 2. Persist primary to Firestore & backend
+      await BookingService.update(primary.id, mergedBooking).catch(() => {});
+      await fetch(`/api/bookings/${primary.bookingRef || primary.id}`, {
+        method: 'PUT',
+        headers: { ...(auth?.headers || {}), 'Content-Type': 'application/json' },
+        body: JSON.stringify(mergedBooking)
+      });
+
+      // 3. Delete duplicate bookings from Firestore & backend
+      for (const other of others) {
+        BookingService.delete(other.id).catch(() => {});
+        HotelBookingService.delete(other.id).catch(() => {});
+        fetch(`/api/bookings/${other.bookingRef || other.id}`, {
+          method: 'DELETE',
+          headers: { ...(auth?.headers || {}) }
+        }).catch(() => {});
+      }
+
+      showModal('success', 'Bookings Consolidated', `Merged into 1 consolidated reservation for ${primary.customerName} (Rooms: ${roomNamesStr}).`);
+      if (fetchAll) fetchAll();
+      if (fetchDash) fetchDash();
+    } catch (err) {
+      showModal('error', 'Consolidation Error', err.message);
     }
   };
 
@@ -475,7 +653,7 @@ export default function RoomBookingsTab({
       {/* ═══════════════════════════════════════════════════════════════════ */}
       {/* 1. TOP METRICS DASHBOARD                                            */}
       {/* ═══════════════════════════════════════════════════════════════════ */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3.5">
+      <div className="no-print grid grid-cols-2 sm:grid-cols-5 gap-3.5">
         <div className={`${cardCls} p-4 flex items-center gap-3.5`}>
           <div className="w-11 h-11 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-lg font-black shrink-0">
             <i className="fa-solid fa-hotel"></i>
@@ -534,7 +712,7 @@ export default function RoomBookingsTab({
       {/* ═══════════════════════════════════════════════════════════════════ */}
       {/* 2. CONTROLS BAR: SEARCH, FILTERS & NEW BOOKING BUTTON              */}
       {/* ═══════════════════════════════════════════════════════════════════ */}
-      <div className={`${cardCls} p-4 flex flex-col lg:flex-row items-center justify-between gap-4`}>
+      <div className={`no-print ${cardCls} p-4 flex flex-col lg:flex-row items-center justify-between gap-4`}>
         {/* Search */}
         <div className="w-full lg:w-96 relative">
           <i className="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400 text-xs"></i>
@@ -650,18 +828,55 @@ export default function RoomBookingsTab({
         </div>
       </div>
 
-      {/* Printable Report Header */}
-      <div className="print-only mb-4 p-4 border-b border-stone-300">
-        <h2 className="text-xl font-bold">Motorental Siemreab Angkor & Guesthouse</h2>
-        <p className="text-sm text-stone-700 font-semibold">Customer Room Reservations & Occupancy Manifest</p>
-        <p className="text-xs text-stone-500">Total Bookings: {filteredBookings.length} | Printed: {new Date().toLocaleString()}</p>
-      </div>
+
+
+      {/* ─── DETECTED MULTI-ROOM / SPLIT BOOKINGS BANNER ─── */}
+      {splitBookingGroups.length > 0 && (
+        <div className="no-print space-y-2.5">
+          {splitBookingGroups.map((group, idx) => {
+            const guest = group[0].customerName;
+            const dates = group[0].startDate || group[0].checkInDate;
+            const rNames = group.map(b => b.roomName || b.roomId).join(', ');
+            const totalGroupAmount = group.reduce((sum, b) => sum + Number(b.totalFee || (b.pricePerDay || b.price || 25) * (b.totalDays || 1) || 25), 0);
+            const totalGroupDeposit = group.reduce((sum, b) => sum + Number(b.deposit || 0), 0);
+
+            return (
+              <div
+                key={idx}
+                className="p-4 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-50 border border-amber-300 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold text-base shrink-0 shadow-2xs">
+                    <i className="fa-solid fa-layer-group"></i>
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-amber-950">
+                      Detected {group.length} separate room bookings for <span className="text-stone-900 underline font-black">{guest}</span> on {dates} ({rNames})
+                    </p>
+                    <p className="text-[11px] text-amber-700 mt-0.5">
+                      Combine into 1 consolidated reservation in 1 table/card with Total: ${totalGroupAmount.toFixed(2)}{totalGroupDeposit > 0 ? ` (Deposit: $${totalGroupDeposit.toFixed(2)})` : ''}.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleMergeBookings(group)}
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl shadow-xs transition flex items-center gap-1.5 shrink-0 cursor-pointer"
+                >
+                  <i className="fa-solid fa-arrows-to-circle"></i>
+                  <span>Merge into 1 Booking</span>
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* ═══════════════════════════════════════════════════════════════════ */}
       {/* 3. BOOKINGS VIEW: CARDS / GRID VIEW                                */}
       {/* ═══════════════════════════════════════════════════════════════════ */}
       {viewMode === 'cards' ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div className="no-print grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {filteredBookings.map(b => {
             const bStatus = b.status || 'confirmed';
             const nightly = b.pricePerDay || b.price || 25;
@@ -712,9 +927,16 @@ export default function RoomBookingsTab({
                   <div className="p-4 space-y-3">
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <h4 className="font-black text-stone-900 text-lg font-display">
-                          Room {b.roomName || b.roomId || '101'}
-                        </h4>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h4 className="font-black text-stone-900 text-lg font-display">
+                            Room {b.roomName || b.roomId || '101'}
+                          </h4>
+                          {b.roomIds && b.roomIds.length > 1 && (
+                            <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-bold">
+                              {b.roomIds.length} Rooms
+                            </span>
+                          )}
+                        </div>
                         <p className="text-xs font-bold text-indigo-600">
                           {b.categoryName || `${b.bedCount || 1} Bed Room`} • {b.bedType || `${b.bedCount || 1} Bed`}
                         </p>
@@ -741,6 +963,23 @@ export default function RoomBookingsTab({
                         <span className="font-bold text-stone-800">{b.endDate}</span>
                       </div>
                     </div>
+
+                    {/* Deposit & Balance Pill (if deposit recorded) */}
+                    {Number(b.deposit) > 0 && (
+                      <div className="p-2 bg-emerald-50/70 border border-emerald-200/80 rounded-xl text-xs flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 text-emerald-800 font-bold text-[11px]">
+                          <i className="fa-solid fa-hand-holding-dollar text-emerald-600"></i>
+                          <span>Deposit Paid: ${Number(b.deposit).toFixed(2)}</span>
+                        </div>
+                        <div className="text-[11px] font-bold">
+                          {Number(b.deposit) >= total ? (
+                            <span className="text-emerald-700">✓ Paid in Full</span>
+                          ) : (
+                            <span className="text-amber-800">Due: ${(total - Number(b.deposit)).toFixed(2)}</span>
+                          )}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Guest Information */}
                     <div className="space-y-1.5 text-xs">
@@ -873,7 +1112,7 @@ export default function RoomBookingsTab({
             <table className="w-full text-sm text-left">
               <thead className="bg-stone-50 border-b border-stone-100 text-xs text-stone-500 uppercase tracking-wider">
                 <tr>
-                  {['Ref / Status', 'Room & Category', 'Guest', 'Phone', 'Dates', 'Stay Duration', 'Total Rate', 'Payment', 'Actions'].map(h => (
+                  {['Ref / Status', 'Room(s)', 'Guest', 'Phone', 'Dates', 'Stay Duration', 'Total / Deposit', 'Payment', 'Actions'].map(h => (
                     <th key={h} className="px-4 py-3 font-bold">{h}</th>
                   ))}
                 </tr>
@@ -883,6 +1122,9 @@ export default function RoomBookingsTab({
                   const bStatus = b.status || 'confirmed';
                   const nightly = b.pricePerDay || b.price || 25;
                   const total = b.totalFee || nightly * (b.totalDays || 1);
+                  const depositAmt = Number(b.deposit || 0);
+                  const isMulti = (b.roomIds && b.roomIds.length > 1) || String(b.roomName || '').includes(',');
+                  const roomCount = b.roomIds?.length || String(b.roomName || '').split(',').length;
 
                   return (
                     <tr key={b.id} className="hover:bg-stone-50 transition-colors">
@@ -896,8 +1138,15 @@ export default function RoomBookingsTab({
 
                       {/* Room */}
                       <td className="px-4 py-3">
-                        <span className="font-black text-stone-900 block">Room {b.roomName || b.roomId || '101'}</span>
-                        <span className="text-xs text-indigo-600 font-medium">{b.categoryName || `${b.bedCount || 1} Bed`}</span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-black text-stone-900 block">Room {b.roomName || b.roomId || '101'}</span>
+                          {isMulti && (
+                            <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-bold">
+                              {roomCount} Rooms
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-xs text-indigo-600 font-medium block">{b.categoryName || `${b.bedCount || 1} Bed`}</span>
                       </td>
 
                       {/* Guest */}
@@ -908,7 +1157,7 @@ export default function RoomBookingsTab({
 
                       {/* Phone */}
                       <td className="px-4 py-3 font-mono text-xs text-stone-700">
-                        <a href={`tel:${b.phone || b.customerPhone}`} className="hover:text-brand-600">
+                        <a href={`tel:${b.phone || b.customerPhone}`} className="hover:text-brand-600 font-bold">
                           {b.phone || b.customerPhone}
                         </a>
                       </td>
@@ -925,10 +1174,26 @@ export default function RoomBookingsTab({
                         <span className="block text-[11px] text-stone-400">{b.guests || 2} Guests</span>
                       </td>
 
-                      {/* Total */}
+                      {/* Total & Deposit */}
                       <td className="px-4 py-3">
                         <span className="font-black text-brand-600 text-sm block">${total}.00</span>
-                        <span className="text-[10px] text-stone-400 font-mono">${nightly}/night</span>
+                        <span className="text-[10px] text-stone-400 font-mono block">${nightly}/night</span>
+                        {depositAmt > 0 ? (
+                          <div className="mt-1 pt-1 border-t border-stone-100 space-y-0.5">
+                            <span className="text-[11px] font-bold text-emerald-700 block">
+                              Deposit: ${depositAmt.toFixed(2)}
+                            </span>
+                            {depositAmt >= total ? (
+                              <span className="text-[10px] font-bold text-emerald-600 block">✓ Paid in full</span>
+                            ) : (
+                              <span className="text-[10px] font-bold text-amber-700 block">
+                                Due: ${(total - depositAmt).toFixed(2)}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-[10px] text-stone-400 italic block mt-0.5">No deposit</span>
+                        )}
                       </td>
 
                       {/* Payment */}
@@ -993,6 +1258,173 @@ export default function RoomBookingsTab({
       )}
 
       {/* ═══════════════════════════════════════════════════════════════════ */}
+      {/* 4B. DEDICATED OFFICIAL PRINTABLE MANIFEST TABLE (PRINT ONLY)        */}
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      <div className="print-only w-full">
+        {/* Official Header */}
+        <div className="border-b-2 border-stone-900 pb-3 mb-4">
+          <div className="flex justify-between items-start">
+            <div>
+              <h1 className="text-xl font-black uppercase tracking-wider text-stone-900">
+                Motorental Siemreab Angkor & Guesthouse
+              </h1>
+              <h2 className="text-sm font-bold text-stone-800 mt-0.5">
+                Customer Room Reservations & Occupancy Manifest (បញ្ជីការកក់បន្ទប់អតិថិជន)
+              </h2>
+              <p className="text-[11px] text-stone-600 mt-0.5">
+                Bakheng Road, Svay Dangkum, Siem Reap, Kingdom of Cambodia • Tel: +855 93 944 487 / +855 69 943 401
+              </p>
+            </div>
+            <div className="text-right">
+              <span className="inline-block px-3 py-1 bg-stone-100 border border-stone-400 rounded font-mono text-[11px] font-black text-stone-900 uppercase">
+                OFFICIAL MANIFEST
+              </span>
+              <p className="text-[10px] text-stone-500 mt-1 font-mono">
+                Printed: {new Date().toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}
+              </p>
+            </div>
+          </div>
+
+          {/* Quick KPI Summary Bar in Print */}
+          <div className="grid grid-cols-4 gap-2.5 mt-3 pt-2.5 border-t border-stone-300 text-xs">
+            <div className="p-2 bg-stone-50 border border-stone-300 rounded">
+              <span className="text-[9px] text-stone-500 font-bold uppercase tracking-wider block">Total Reservations</span>
+              <span className="text-base font-black text-stone-900">{filteredBookings.length} Bookings</span>
+            </div>
+            <div className="p-2 bg-stone-50 border border-stone-300 rounded">
+              <span className="text-[9px] text-stone-500 font-bold uppercase tracking-wider block">Confirmed / In-House</span>
+              <span className="text-base font-black text-emerald-800">{confirmedCount + checkedInCount}</span>
+            </div>
+            <div className="p-2 bg-stone-50 border border-stone-300 rounded">
+              <span className="text-[9px] text-stone-500 font-bold uppercase tracking-wider block">Total Expected Revenue</span>
+              <span className="text-base font-black text-stone-900">
+                ${filteredBookings.reduce((sum, b) => sum + Number(b.totalFee || (b.pricePerDay || 25) * (b.totalDays || 1) || 25), 0).toFixed(2)}
+              </span>
+            </div>
+            <div className="p-2 bg-stone-50 border border-stone-300 rounded">
+              <span className="text-[9px] text-stone-500 font-bold uppercase tracking-wider block">Deposit Paid</span>
+              <span className="text-base font-black text-indigo-900">
+                ${filteredBookings.reduce((sum, b) => sum + Number(b.deposit || 0), 0).toFixed(2)}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Clean, High-Density Table */}
+        <table className="w-full text-left border-collapse text-xs">
+          <thead>
+            <tr className="bg-stone-200 border-y-2 border-stone-900 font-bold text-stone-900 uppercase text-[10px] tracking-wider">
+              <th className="py-2 px-2 border border-stone-400 w-8 text-center">#</th>
+              <th className="py-2 px-2.5 border border-stone-400">Booking Ref</th>
+              <th className="py-2 px-2.5 border border-stone-400">Guest Name & Phone</th>
+              <th className="py-2 px-2.5 border border-stone-400">Room(s) Assigned</th>
+              <th className="py-2 px-2.5 border border-stone-400">Check-in → Check-out</th>
+              <th className="py-2 px-2 border border-stone-400 text-center">Nights</th>
+              <th className="py-2 px-2.5 border border-stone-400 text-right">Total ($)</th>
+              <th className="py-2 px-2.5 border border-stone-400 text-right">Deposit</th>
+              <th className="py-2 px-2.5 border border-stone-400 text-right">Balance Due</th>
+              <th className="py-2 px-2.5 border border-stone-400">Payment</th>
+              <th className="py-2 px-2 border border-stone-400 text-center">Status</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-stone-300">
+            {filteredBookings.map((b, idx) => {
+              const bStatus = b.status || 'confirmed';
+              const nightly = b.pricePerDay || b.price || 25;
+              const total = Number(b.totalFee || nightly * (b.totalDays || 1) || 25);
+              const deposit = Number(b.deposit || 0);
+              const balanceDue = Math.max(0, total - deposit);
+              const isMulti = (b.roomIds && b.roomIds.length > 1) || String(b.roomName || '').includes(',');
+              const roomCount = b.roomIds?.length || String(b.roomName || '').split(',').length;
+
+              return (
+                <tr key={b.id} className="border-b border-stone-300">
+                  <td className="py-2 px-2 border border-stone-300 text-center font-mono text-stone-700">{idx + 1}</td>
+                  <td className="py-2 px-2.5 border border-stone-300 font-mono font-bold text-stone-900">
+                    {b.bookingRef || `#${String(b.id).slice(-5)}`}
+                  </td>
+                  <td className="py-2 px-2.5 border border-stone-300">
+                    <span className="font-bold text-stone-900 block">{b.customerName}</span>
+                    <span className="font-mono text-[10px] text-stone-700">{b.phone || b.customerPhone || 'N/A'}</span>
+                    {b.nationality && <span className="text-[10px] text-stone-500 block">({b.nationality})</span>}
+                  </td>
+                  <td className="py-2 px-2.5 border border-stone-300">
+                    <div className="font-bold text-stone-900">Room {b.roomName || b.roomId || '101'}</div>
+                    <div className="text-[10px] text-stone-600">
+                      {b.categoryName || 'Standard'} {isMulti ? `(${roomCount} Rooms)` : ''}
+                    </div>
+                  </td>
+                  <td className="py-2 px-2.5 border border-stone-300 text-stone-800">
+                    <div className="font-bold">{b.startDate || b.checkInDate} → {b.endDate || b.checkOutDate}</div>
+                    <span className="text-[10px] text-stone-500">{b.arrivalTime || 'Standard'}</span>
+                  </td>
+                  <td className="py-2 px-2 border border-stone-300 text-center font-bold">
+                    {b.totalDays || 1}
+                  </td>
+                  <td className="py-2 px-2.5 border border-stone-300 text-right font-black text-stone-900">
+                    ${total.toFixed(2)}
+                  </td>
+                  <td className="py-2 px-2.5 border border-stone-300 text-right font-semibold text-emerald-800">
+                    {deposit > 0 ? `${deposit.toFixed(2)}` : '—'}
+                  </td>
+                  <td className="py-2 px-2.5 border border-stone-300 text-right font-bold text-stone-900">
+                    {balanceDue > 0 ? `${balanceDue.toFixed(2)}` : 'Paid'}
+                  </td>
+                  <td className="py-2 px-2.5 border border-stone-300 text-[11px] capitalize text-stone-700">
+                    {b.paymentMethod === 'cash' ? 'Cash' : (b.paymentMethod || 'ABA KHQR')}
+                  </td>
+                  <td className="py-2 px-2 border border-stone-300 text-center">
+                    <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border border-stone-500">
+                      {bStatus === 'checked_in' ? 'Checked In' : bStatus}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr className="bg-stone-200 border-t-2 border-stone-900 font-bold text-stone-900">
+              <td colSpan={6} className="py-2 px-3 border border-stone-400 text-right uppercase text-[11px]">
+                Total Summary:
+              </td>
+              <td className="py-2 px-2.5 border border-stone-400 text-right text-xs font-black">
+                ${filteredBookings.reduce((sum, b) => sum + Number(b.totalFee || (b.pricePerDay || 25) * (b.totalDays || 1) || 25), 0).toFixed(2)}
+              </td>
+              <td className="py-2 px-2.5 border border-stone-400 text-right text-xs font-bold text-emerald-800">
+                ${filteredBookings.reduce((sum, b) => sum + Number(b.deposit || 0), 0).toFixed(2)}
+              </td>
+              <td className="py-2 px-2.5 border border-stone-400 text-right text-xs font-black text-stone-900">
+                ${filteredBookings.reduce((sum, b) => {
+                  const t = Number(b.totalFee || (b.pricePerDay || 25) * (b.totalDays || 1) || 25);
+                  const d = Number(b.deposit || 0);
+                  return sum + Math.max(0, t - d);
+                }, 0).toFixed(2)}
+              </td>
+              <td colSpan={2} className="py-2 px-2 border border-stone-400"></td>
+            </tr>
+          </tfoot>
+        </table>
+
+        {/* Manager Sign-Off Section */}
+        <div className="mt-8 pt-4 border-t border-stone-300 grid grid-cols-3 gap-6 text-xs text-stone-700">
+          <div>
+            <p className="font-bold text-stone-900">Front Desk / Prepared By:</p>
+            <div className="mt-8 border-b border-stone-400 w-44"></div>
+            <p className="text-[10px] text-stone-500 mt-1">Signature & Name</p>
+          </div>
+          <div>
+            <p className="font-bold text-stone-900">Verified By Duty Manager:</p>
+            <div className="mt-8 border-b border-stone-400 w-44"></div>
+            <p className="text-[10px] text-stone-500 mt-1">Signature & Date</p>
+          </div>
+          <div className="text-right">
+            <p className="font-bold text-stone-900">Official Stamp / Guesthouse Seal:</p>
+            <div className="mt-8 inline-block border border-dashed border-stone-400 w-28 h-12 rounded"></div>
+          </div>
+        </div>
+      </div>
+
+      {/* ═══════════════════════════════════════════════════════════════════ */}
       {/* 5. MODAL: "SEE ALL" RESERVATION VOUCHER MODAL                      */}
       {/* ═══════════════════════════════════════════════════════════════════ */}
       {detailBooking && (
@@ -1021,18 +1453,46 @@ export default function RoomBookingsTab({
             {/* Modal Content */}
             <div className="p-6 overflow-y-auto space-y-5 text-xs text-stone-700">
               {/* Status Header */}
-              <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 flex items-center justify-between">
-                <div>
-                  <span className="text-[10px] font-bold text-stone-400 uppercase block">Reservation Status</span>
-                  <span className="font-black text-sm capitalize text-stone-900">{detailBooking.status || 'Confirmed'}</span>
-                </div>
-                <div className="text-right">
-                  <span className="text-[10px] font-bold text-stone-400 uppercase block">Total Amount</span>
-                  <span className="font-black text-brand-600 text-base">
-                    ${detailBooking.totalFee || detailBooking.pricePerDay * detailBooking.totalDays || 25}.00 USD
-                  </span>
-                </div>
-              </div>
+              {(() => {
+                const total = Number(detailBooking.totalFee || (detailBooking.pricePerDay || 25) * (detailBooking.totalDays || 1) || 25);
+                const deposit = Number(detailBooking.deposit || 0);
+                const balanceDue = Math.max(0, total - deposit);
+                const isMulti = (detailBooking.roomIds && detailBooking.roomIds.length > 1) || String(detailBooking.roomName || '').includes(',');
+                const roomCount = detailBooking.roomIds?.length || String(detailBooking.roomName || '').split(',').length;
+
+                return (
+                  <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                    <div>
+                      <span className="text-[10px] font-bold text-stone-400 uppercase block">Reservation Status</span>
+                      <span className="font-black text-sm capitalize text-stone-900">{detailBooking.status || 'Confirmed'}</span>
+                      {isMulti && (
+                        <span className="inline-block mt-1 px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-bold">
+                          {roomCount} Rooms Consolidated
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-left sm:text-right">
+                      <span className="text-[10px] font-bold text-stone-400 uppercase block">Total Amount</span>
+                      <span className="font-black text-brand-600 text-base block">
+                        ${total.toFixed(2)} USD
+                      </span>
+                      {deposit > 0 ? (
+                        <div className="text-[11px] font-bold mt-1 space-x-1">
+                          <span className="text-emerald-700 font-bold">Deposit: ${deposit.toFixed(2)}</span>
+                          <span className="text-stone-300">•</span>
+                          {deposit >= total ? (
+                            <span className="text-emerald-600">✓ Paid in Full</span>
+                          ) : (
+                            <span className="text-amber-700">Due: ${balanceDue.toFixed(2)}</span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-stone-400 italic">No deposit recorded</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Guest Details */}
               <div>
@@ -1062,8 +1522,15 @@ export default function RoomBookingsTab({
                 <h4 className="font-bold text-stone-900 text-sm uppercase tracking-wider mb-2">Room & Stay Details</h4>
                 <div className="grid grid-cols-2 gap-3 p-3.5 bg-stone-50 rounded-xl border border-stone-100">
                   <div>
-                    <span className="text-stone-400 block text-[10px]">Assigned Room</span>
-                    <span className="font-black text-stone-900 text-sm">Room {detailBooking.roomName || detailBooking.roomId}</span>
+                    <span className="text-stone-400 block text-[10px]">Assigned Room(s)</span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-black text-stone-900 text-sm">Room {detailBooking.roomName || detailBooking.roomId}</span>
+                      {((detailBooking.roomIds && detailBooking.roomIds.length > 1) || String(detailBooking.roomName || '').includes(',')) && (
+                        <span className="px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-[10px] font-bold border border-indigo-200">
+                          {detailBooking.roomIds?.length || String(detailBooking.roomName || '').split(',').length} Rooms
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div>
                     <span className="text-stone-400 block text-[10px]">Bed Category</span>
@@ -1171,23 +1638,23 @@ export default function RoomBookingsTab({
             </div>
 
             <form onSubmit={handleCreateNewBooking} className="p-6 overflow-y-auto space-y-4">
-              {/* Room Selection */}
-              <div>
-                <label className={labelCls}>Select Room *</label>
-                <select
-                  value={newForm.roomId}
-                  onChange={e => setNewForm({ ...newForm, roomId: e.target.value })}
-                  className={inputCls}
-                  required
-                >
-                  <option value="">-- Choose Room --</option>
-                  {rooms.map(r => (
-                    <option key={r.id} value={r.id}>
-                      Room {r.name} — Floor {r.floor || '1'} — {r.categoryName || `${r.bedCount || 1} Bed`} (${r.price || r.rate || 25}/night) [{r.status || 'vacant'}]
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {/* Room Selection (Searchable & Multi-Room) */}
+              <SearchRoomPicker
+                label="Select Room(s) (1 or Multiple Rooms)"
+                rooms={rooms}
+                selectedRoomIds={newForm.roomIds}
+                selectedRoomId={newForm.roomId}
+                onSelectMultiple={(ids) => {
+                  setNewForm({
+                    ...newForm,
+                    roomIds: ids,
+                    roomId: ids[0] || ''
+                  });
+                }}
+                multiple={true}
+                required={true}
+                placeholder="Search room (e.g. 101, Floor 2, Suite)..."
+              />
 
               {/* Guest Details */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1249,8 +1716,8 @@ export default function RoomBookingsTab({
                 </div>
               </div>
 
-              {/* Booking Channel / Source & Payment & Arrival */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* Booking Channel / Source, Payment, Deposit & Arrival */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 <div>
                   <label className={labelCls}>
                     <i className="fa-solid fa-share-nodes mr-1 text-blue-500"></i>
@@ -1280,7 +1747,23 @@ export default function RoomBookingsTab({
                   >
                     <option value="cash">Pay on Arrival (Cash)</option>
                     <option value="aba">ABA PAY / KHQR</option>
+                    <option value="bank_transfer">Bank Transfer</option>
                   </select>
+                </div>
+                <div>
+                  <label className={labelCls}>
+                    <i className="fa-solid fa-hand-holding-dollar text-emerald-600 mr-1"></i>
+                    Deposit ($) / ប្រាក់កក់
+                  </label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    placeholder="0.00"
+                    value={newForm.deposit}
+                    onChange={e => setNewForm({ ...newForm, deposit: e.target.value })}
+                    className={`${inputCls} border-emerald-300 font-bold text-emerald-800`}
+                  />
                 </div>
                 <div>
                   <label className={labelCls}>Estimated Arrival</label>
@@ -1297,6 +1780,50 @@ export default function RoomBookingsTab({
                   </select>
                 </div>
               </div>
+
+              {/* Live Financial Calculation Box for New Booking */}
+              {(() => {
+                const targetIds = (newForm.roomIds && newForm.roomIds.length > 0)
+                  ? newForm.roomIds
+                  : (newForm.roomId ? [newForm.roomId] : []);
+                const selRooms = targetIds.map(rid => rooms.find(r => String(r.id) === String(rid)) || { id: rid, name: String(rid), price: 25 });
+                const dailyRate = selRooms.reduce((sum, r) => sum + Number(r.price || r.rate || 25), 0);
+                const start = new Date(newForm.startDate);
+                const end = new Date(newForm.endDate);
+                const nights = Math.max(1, Math.ceil((end - start) / 86400000) || 1);
+                const totalStay = dailyRate * nights;
+                const depositNum = parseFloat(newForm.deposit) || 0;
+                const balanceDue = Math.max(0, totalStay - depositNum);
+
+                return (
+                  <div className="p-3.5 bg-stone-50 rounded-2xl border border-stone-200 space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-stone-500 font-medium">
+                        Selected: <strong className="text-stone-900">{selRooms.length > 0 ? `${selRooms.length} Room(s) (${selRooms.map(r => r.name).join(', ')})` : 'None'}</strong>
+                      </span>
+                      <span className="font-bold text-stone-700 font-mono">
+                        ${dailyRate}/night × {nights} night{nights > 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    <div className="pt-2 border-t border-stone-200/80 grid grid-cols-3 gap-2 text-center">
+                      <div className="bg-white p-2 rounded-xl border border-stone-200">
+                        <span className="text-[10px] uppercase font-bold text-stone-400 block">Total Stay</span>
+                        <span className="font-black text-brand-600 text-sm">${totalStay.toFixed(2)}</span>
+                      </div>
+                      <div className="bg-emerald-50 p-2 rounded-xl border border-emerald-200">
+                        <span className="text-[10px] uppercase font-bold text-emerald-700 block">Deposit Paid</span>
+                        <span className="font-black text-emerald-800 text-sm">${depositNum.toFixed(2)}</span>
+                      </div>
+                      <div className={`p-2 rounded-xl border ${depositNum >= totalStay && totalStay > 0 ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-amber-50 border-amber-200 text-amber-900'}`}>
+                        <span className="text-[10px] uppercase font-bold block opacity-75">Balance Due</span>
+                        <span className="font-black text-sm">
+                          {depositNum >= totalStay && totalStay > 0 ? '✓ Paid in Full' : `$${balanceDue.toFixed(2)}`}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div>
                 <label className={labelCls}>Notes / Special Requests</label>
@@ -1397,28 +1924,31 @@ export default function RoomBookingsTab({
                 </div>
               </div>
 
-              {/* Room Selection */}
+              {/* Room Selection (Multi-Room Search Picker) */}
               <div>
-                <label className={labelCls}>Assigned Physical Room</label>
-                <select
-                  value={editForm.roomId}
-                  onChange={e => {
-                    const sel = rooms.find(r => String(r.id) === String(e.target.value));
+                <SearchRoomPicker
+                  label="Assigned Room(s) (1 or Multiple Rooms)"
+                  rooms={rooms}
+                  selectedRoomIds={editForm.roomIds}
+                  selectedRoomId={editForm.roomId}
+                  onSelectMultiple={(ids) => {
+                    const selRooms = ids.map(rid => rooms.find(r => String(r.id) === String(rid)) || { id: rid, name: String(rid), price: 25 });
+                    const newDailyRate = selRooms.reduce((sum, r) => sum + Number(r.price || r.rate || 25), 0);
+                    const start = new Date(editForm.startDate);
+                    const end = new Date(editForm.endDate);
+                    const nights = Math.max(1, Math.ceil((end - start) / 86400000) || 1);
                     setEditForm({
                       ...editForm,
-                      roomId: e.target.value,
-                      pricePerDay: sel?.price || sel?.rate || editForm.pricePerDay
+                      roomIds: ids,
+                      roomId: ids[0] || '',
+                      pricePerDay: newDailyRate || editForm.pricePerDay,
+                      totalFee: (newDailyRate || editForm.pricePerDay) * nights
                     });
                   }}
-                  className={inputCls}
-                >
-                  <option value="">Select Room...</option>
-                  {rooms.map(r => (
-                    <option key={r.id} value={r.id}>
-                      Room {r.name} — {r.categoryName || `${r.bedCount || 1} Bed`} (${r.price || r.rate || 25}/night)
-                    </option>
-                  ))}
-                </select>
+                  multiple={true}
+                  required={true}
+                  placeholder="Search room (e.g. 101, 202, Suite)..."
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -1428,7 +1958,13 @@ export default function RoomBookingsTab({
                     type="date"
                     required
                     value={editForm.startDate}
-                    onChange={e => setEditForm({ ...editForm, startDate: e.target.value })}
+                    onChange={e => {
+                      const newStart = e.target.value;
+                      const start = new Date(newStart);
+                      const end = new Date(editForm.endDate);
+                      const nights = Math.max(1, Math.ceil((end - start) / 86400000) || 1);
+                      setEditForm({ ...editForm, startDate: newStart, totalFee: (editForm.pricePerDay || 25) * nights });
+                    }}
                     className={inputCls}
                   />
                 </div>
@@ -1438,13 +1974,19 @@ export default function RoomBookingsTab({
                     type="date"
                     required
                     value={editForm.endDate}
-                    onChange={e => setEditForm({ ...editForm, endDate: e.target.value })}
+                    onChange={e => {
+                      const newEnd = e.target.value;
+                      const start = new Date(editForm.startDate);
+                      const end = new Date(newEnd);
+                      const nights = Math.max(1, Math.ceil((end - start) / 86400000) || 1);
+                      setEditForm({ ...editForm, endDate: newEnd, totalFee: (editForm.pricePerDay || 25) * nights });
+                    }}
                     className={inputCls}
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className={labelCls}>Guests</label>
                   <input
@@ -1467,17 +2009,84 @@ export default function RoomBookingsTab({
                     className={inputCls}
                   />
                 </div>
+              </div>
+
+              {/* Pricing, Deposit & Financial Summary */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3.5 bg-stone-50 rounded-2xl border border-stone-200">
                 <div>
                   <label className={labelCls}>Rate / Night ($)</label>
                   <input
                     type="number"
                     step="0.5"
                     value={editForm.pricePerDay}
-                    onChange={e => setEditForm({ ...editForm, pricePerDay: parseFloat(e.target.value) || 0 })}
+                    onChange={e => {
+                      const rate = parseFloat(e.target.value) || 0;
+                      const start = new Date(editForm.startDate);
+                      const end = new Date(editForm.endDate);
+                      const nights = Math.max(1, Math.ceil((end - start) / 86400000) || 1);
+                      setEditForm({ ...editForm, pricePerDay: rate, totalFee: rate * nights });
+                    }}
                     className={inputCls}
                   />
                 </div>
+                <div>
+                  <label className={labelCls}>Total Stay ($)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={editForm.totalFee}
+                    onChange={e => setEditForm({ ...editForm, totalFee: parseFloat(e.target.value) || 0 })}
+                    className={inputCls}
+                  />
+                </div>
+                <div>
+                  <label className={labelCls}>
+                    <i className="fa-solid fa-hand-holding-dollar text-emerald-600 mr-1"></i>
+                    Deposit ($) / ប្រាក់កក់
+                  </label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    placeholder="0.00"
+                    value={editForm.deposit}
+                    onChange={e => setEditForm({ ...editForm, deposit: e.target.value })}
+                    className={`${inputCls} border-emerald-300 font-bold text-emerald-800`}
+                  />
+                </div>
               </div>
+
+              {/* Live Financial Calculation Box in Edit Modal */}
+              {(() => {
+                const totalStay = Number(editForm.totalFee || 0);
+                const depositNum = parseFloat(editForm.deposit) || 0;
+                const balanceDue = Math.max(0, totalStay - depositNum);
+
+                return (
+                  <div className="p-3 bg-emerald-50/50 rounded-xl border border-emerald-200 flex items-center justify-between text-xs">
+                    <div>
+                      <span className="text-[10px] font-bold text-stone-500 uppercase block">Total Stay</span>
+                      <span className="font-black text-stone-900 text-sm">
+                        ${totalStay.toFixed(2)}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold text-emerald-700 uppercase block">Deposit Paid</span>
+                      <span className="font-black text-emerald-700 text-sm">
+                        ${depositNum.toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[10px] font-bold text-stone-500 uppercase block">Balance Due</span>
+                      <span className={`font-black text-sm ${depositNum >= totalStay && totalStay > 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                        {depositNum >= totalStay && totalStay > 0
+                          ? '✓ Paid in Full'
+                          : `$${balanceDue.toFixed(2)}`}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>

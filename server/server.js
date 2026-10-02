@@ -148,6 +148,8 @@ const db = new sqlite3.Database(databasePath, (err) => {
       db.run(`ALTER TABLE bookings ADD COLUMN arrivalTime TEXT`, () => {});
       db.run(`ALTER TABLE bookings ADD COLUMN nationality TEXT`, () => {});
       db.run(`ALTER TABLE bookings ADD COLUMN email TEXT`, () => {});
+      db.run(`ALTER TABLE bookings ADD COLUMN deposit REAL DEFAULT 0`, () => {});
+      db.run(`ALTER TABLE bookings ADD COLUMN roomIds TEXT`, () => {});
     });
 
     // Guests CRM
@@ -445,8 +447,9 @@ const db = new sqlite3.Database(databasePath, (err) => {
       const defaultPaymentMethods = {
         cashEnabled: true,
         abaKhqrEnabled: true,
-        abaAccountName: "MOTOR RENTAL SIEM REAP ANGKOR",
-        abaAccountNumber: "016 308 199 (USD)",
+        abaAccountName: "SOM SUMNANG",
+        abaAccountNumber: "000 314 574",
+        abaAccountCurrency: "USD",
         abaQrImage: "",
         cardEnabled: true,
         bankTransferEnabled: true
@@ -458,7 +461,10 @@ const db = new sqlite3.Database(databasePath, (err) => {
         companyHeader: "Siem Reap Angkor Guesthouse & Motor Rentals",
         taxNumber: "K002-901829381",
         footerNote: "Thank you for choosing Siem Reap Angkor! We wish you a safe and memorable journey around Angkor.",
-        terms: "Please retain this invoice for your records. All damage and late return fees are subject to check-out inspection."
+        terms: "Please retain this invoice for your records. All damage and late return fees are subject to check-out inspection.",
+        showReceivingAccount: true,
+        receivingAccountNo: "000 314 574",
+        receivingAccountName: "SOM SUMNANG"
       };
       db.run(`INSERT OR IGNORE INTO settings (key, value) VALUES ('invoice_settings', ?)`, [JSON.stringify(defaultInvoiceSettings)]);
 
@@ -480,6 +486,31 @@ const db = new sqlite3.Database(databasePath, (err) => {
         sessionTimeoutMinutes: 120
       };
       db.run(`INSERT OR IGNORE INTO settings (key, value) VALUES ('security_settings', ?)`, [JSON.stringify(defaultSecuritySettings)]);
+
+      // 7. Custom Invoices & Other Receipts Profile (Separate from Room & Moto)
+      const defaultCustomInvoiceProfile = {
+        businessName: "Siem Reap Angkor Services & Hospitality",
+        invoiceTitle: "OFFICIAL RECEIPT / INVOICE",
+        subtitle: "Tours, Transportation, Guest Services & Custom Folio",
+        logo: "/assets/logo.png",
+        address: "Near Angkor Wat Main Gate, Siem Reap, Cambodia",
+        phone: "+855 016 308 199",
+        email: "info@siemreapangkor.com",
+        taxNumber: "K002-901829381",
+        currency: "USD",
+        exchangeRate: 4000,
+        receivingAccountNo: "000 314 574",
+        receivingAccountName: "SOM SUMNANG",
+        footerNote: "Thank you for choosing our services! Safe travels around Siem Reap & Angkor temples.",
+        terms: "Please retain this official receipt for your records. All tours and services subject to local safety guidelines.",
+        paperSize: "a4",
+        showLogo: true,
+        showKhr: true,
+        showSignatures: true,
+        showTaxId: true,
+        showReceivingAccount: true
+      };
+      db.run(`INSERT OR IGNORE INTO settings (key, value) VALUES ('custom_invoice_profile', ?)`, [JSON.stringify(defaultCustomInvoiceProfile)]);
     });
 
     // Seed staff users if empty
@@ -1845,6 +1876,7 @@ app.post('/api/bookings', async (req, res) => {
     type,
     itemName,
     roomId,
+    roomIds,
     roomName,
     categoryName,
     bedType,
@@ -1859,6 +1891,7 @@ app.post('/api/bookings', async (req, res) => {
     bedCount,
     pricePerDay,
     totalFee,
+    deposit,
     paymentMethod,
     arrivalTime,
     specialRequests,
@@ -1866,16 +1899,18 @@ app.post('/api/bookings', async (req, res) => {
   } = req.body;
 
   const bRef = bookingRef || `SR-${type === 'room' ? 'ROOM' : 'BK'}-${Math.floor(10000 + Math.random() * 90000)}`;
+  const roomIdsStr = Array.isArray(roomIds) ? JSON.stringify(roomIds) : (roomIds || '');
 
   db.run(`INSERT INTO bookings (
-      type, itemName, roomId, roomName, categoryName, bedType, bookingRef,
+      type, itemName, roomId, roomIds, roomName, categoryName, bedType, bookingRef,
       customerName, phone, email, nationality, startDate, endDate, guests,
-      bedCount, pricePerDay, totalFee, paymentMethod, arrivalTime, specialRequests, status
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      bedCount, pricePerDay, totalFee, deposit, paymentMethod, arrivalTime, specialRequests, status
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       type || 'room',
       itemName,
       roomId || '',
+      roomIdsStr,
       roomName || '',
       categoryName || '',
       bedType || '',
@@ -1890,6 +1925,7 @@ app.post('/api/bookings', async (req, res) => {
       bedCount || 1,
       pricePerDay || 0,
       totalFee || 0,
+      Number(deposit || 0),
       paymentMethod || 'cash',
       arrivalTime || '',
       specialRequests || '',
@@ -1912,18 +1948,93 @@ app.post('/api/bookings', async (req, res) => {
       }).catch(e => console.warn('TG booking alert error:', e));
 
       io.emit('new_booking', { message: 'A new booking was submitted.' });
-      res.json({ id: this.lastID, bookingRef: bRef, message: 'Booking submitted successfully!' });
+      res.json({ id: this.lastID, bookingRef: bRef, deposit: Number(deposit || 0), message: 'Booking submitted successfully!' });
     });
 });
 app.put('/api/bookings/:id', authenticateToken, (req, res) => {
-  const { type, itemName, customerName, phone, startDate, endDate, guests, bedCount, specialRequests, status } = req.body;
-  db.run(`UPDATE bookings SET type=?, itemName=?, customerName=?, phone=?, startDate=?, endDate=?, guests=?, bedCount=?, specialRequests=?, status=? WHERE id=?`,
-    [type, itemName, customerName, phone, startDate, endDate, guests || 1, bedCount || 1, specialRequests || '', status || 'pending', req.params.id],
+  const {
+    type,
+    itemName,
+    customerName,
+    phone,
+    email,
+    nationality,
+    roomId,
+    roomIds,
+    roomName,
+    categoryName,
+    bedType,
+    startDate,
+    endDate,
+    guests,
+    bedCount,
+    pricePerDay,
+    totalFee,
+    deposit,
+    paymentMethod,
+    arrivalTime,
+    specialRequests,
+    status
+  } = req.body;
+
+  const idParam = req.params.id;
+  const roomIdsStr = Array.isArray(roomIds) ? JSON.stringify(roomIds) : (roomIds || '');
+
+  db.run(`UPDATE bookings SET
+      type = COALESCE(?, type),
+      itemName = COALESCE(?, itemName),
+      customerName = COALESCE(?, customerName),
+      phone = COALESCE(?, phone),
+      email = COALESCE(?, email),
+      nationality = COALESCE(?, nationality),
+      roomId = COALESCE(?, roomId),
+      roomIds = COALESCE(?, roomIds),
+      roomName = COALESCE(?, roomName),
+      categoryName = COALESCE(?, categoryName),
+      bedType = COALESCE(?, bedType),
+      startDate = COALESCE(?, startDate),
+      endDate = COALESCE(?, endDate),
+      guests = COALESCE(?, guests),
+      bedCount = COALESCE(?, bedCount),
+      pricePerDay = COALESCE(?, pricePerDay),
+      totalFee = COALESCE(?, totalFee),
+      deposit = COALESCE(?, deposit),
+      paymentMethod = COALESCE(?, paymentMethod),
+      arrivalTime = COALESCE(?, arrivalTime),
+      specialRequests = COALESCE(?, specialRequests),
+      status = COALESCE(?, status)
+    WHERE id = ? OR bookingRef = ?`,
+    [
+      type,
+      itemName,
+      customerName,
+      phone,
+      email,
+      nationality,
+      roomId,
+      roomIdsStr,
+      roomName,
+      categoryName,
+      bedType,
+      startDate,
+      endDate,
+      guests,
+      bedCount,
+      pricePerDay,
+      totalFee,
+      deposit !== undefined ? Number(deposit || 0) : null,
+      paymentMethod,
+      arrivalTime,
+      specialRequests,
+      status,
+      idParam,
+      idParam
+    ],
     function(err) {
       if (err) res.status(500).json({ error: err.message });
       else {
         io.emit('booking_updated');
-        res.json({ changes: this.changes });
+        res.json({ changes: this.changes, success: true });
       }
     });
 });
